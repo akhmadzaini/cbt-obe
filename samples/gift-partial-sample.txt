@@ -1,0 +1,7 @@
+$CATEGORY: Sains/Partial
+
+::Partial credit pilihan tunggal::
+Ibu kota Indonesia adalah? {=Jakarta#Benar sekali ~%50%Bandung#Hampir, itu ibu kota Jawa Barat ~Surabaya ~Medan}
+
+::Multiple response parsial::
+Manakah yang termasuk bilangan prima? {~%50%2 ~%50%3 ~%50%5 ~%0%4 ~%0%6}

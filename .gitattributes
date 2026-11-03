@@ -1,0 +1,12 @@
+# Normalisasi line ending agar konsisten antara Windows dan VPS Linux.
+* text=auto eol=lf
+
+# File biner tidak boleh diubah line ending-nya.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.gif binary
+*.ico binary
+*.xlsx binary
+*.tar.gz binary

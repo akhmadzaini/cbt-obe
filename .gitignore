@@ -1,0 +1,28 @@
+node_modules/
+dist/
+build/
+.env
+.env.local
+*.log
+.DS_Store
+Thumbs.db
+
+# Tooling / cache
+*.tsbuildinfo
+.vite/
+coverage/
+.idea/
+.fleet/
+
+# Uploaded files (bind mount) - keep directory but not contents
+data/uploads/*
+!data/uploads/.gitkeep
+
+# Arsip backup sistem (berisi dump database) - jangan pernah di-commit
+data/backups/*
+!data/backups/.gitkeep
+
+# Bun / npm
+bun.lockb
+bun.lock
+package-lock.json

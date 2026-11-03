@@ -1,0 +1,78 @@
+services:
+  db:
+    image: mariadb:11.4
+    restart: unless-stopped
+    environment:
+      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+      MARIADB_DATABASE: ${DB_NAME}
+      MARIADB_USER: ${DB_USER}
+      MARIADB_PASSWORD: ${DB_PASSWORD}
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    volumes:
+      - db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    networks:
+      - cbt
+
+  backend:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DB_HOST: db
+      DB_PORT: 3306
+      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      BIND_IP: ${BIND_IP:-false}
+      RATE_LIMIT_ENABLED: ${RATE_LIMIT_ENABLED:-true}
+      LOGIN_IP_LIMIT: ${LOGIN_IP_LIMIT:-300}
+      LOGIN_USER_LIMIT: ${LOGIN_USER_LIMIT:-5}
+      LOGIN_WINDOW_SECONDS: ${LOGIN_WINDOW_SECONDS:-300}
+      BACKUP_ENABLED: ${BACKUP_ENABLED:-true}
+      BACKUP_DIR: /data/backups
+      BACKUP_RETENTION_COUNT: ${BACKUP_RETENTION_COUNT:-10}
+      BACKUP_MAX_UPLOAD_MB: ${BACKUP_MAX_UPLOAD_MB:-1024}
+      UPLOAD_DIR: /data/uploads
+      SEED_ON_START: ${SEED_ON_START:-true}
+      SEED_ADMIN_USERNAME: ${SEED_ADMIN_USERNAME:-admin}
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-admin12345}
+      SEED_STUDENT_USERNAME: ${SEED_STUDENT_USERNAME:-siswa}
+      SEED_STUDENT_PASSWORD: ${SEED_STUDENT_PASSWORD:-siswa12345}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
+      # Wajib di belakang Nginx Proxy Manager
+      TRUST_PROXY: "true"
+    volumes:
+      - ./data/uploads:/data/uploads
+      - ./data/backups:/data/backups
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - cbt
+
+  frontend:
+    build:
+      context: ./frontend
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-8080}:80"
+    depends_on:
+      - backend
+    networks:
+      - cbt
+
+volumes:
+  db_data:
+
+networks:
+  cbt:

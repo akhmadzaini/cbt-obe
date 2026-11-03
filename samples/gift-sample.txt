@@ -1,0 +1,19 @@
+$CATEGORY: Matematika/Aljabar
+
+::Persamaan linear::
+Nilai x dari 2x + 4 = 10 adalah ... {=3 ~2 ~4 ~5}
+
+::Benar atau salah::
+Bumi berbentuk bulat. {TRUE}
+
+::Matching planet::
+Pasangkan planet dengan urutannya dari Matahari. {=Merkurius -> 1 =Venus -> 2 =Bumi -> 3}
+
+::Ibu kota Jepang::
+Ibu kota Jepang adalah ... {=Tokyo =TOKYO}
+
+::Akar kuadrat::
+Akar kuadrat dari 144 adalah ... {#12:0.01}
+
+::Essay::
+Jelaskan proses fotosintesis secara singkat. {}
