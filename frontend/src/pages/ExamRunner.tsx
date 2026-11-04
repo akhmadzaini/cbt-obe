@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { useNavigate, useParams } from "react-router-dom";
-import QuestionCard from "../components/QuestionCard";
+import ExamWorkspace from "../components/exam/ExamWorkspace";
+import PreStartScreen from "../components/exam/PreStartScreen";
+import FinishedScreen from "../components/exam/FinishedScreen";
+import ResultScreen from "../components/exam/ResultScreen";
+import type { OverlayState, ResultState } from "../components/exam/types";
 import { api, apiForm, clearToken } from "../lib/api";
 import {
   captureExamScreenshot,
@@ -13,7 +16,7 @@ import {
   STRIKE_TYPES,
   unlockKeyboard,
 } from "../lib/anticheat";
-import { formatTime, isAnswered, parseAnswers } from "../lib/exam-utils";
+import { isAnswered, parseAnswers } from "../lib/exam-utils";
 import type {
   AnswerState,
   ExamSummary,
@@ -32,18 +35,6 @@ const VIOLATION_MESSAGE: Record<ViolationType, string> = {
   contextmenu: "Klik kanan dilarang.",
   copy_paste: "Seleksi, copy, cut, dan paste dilarang.",
   keyboard_shortcut: "Pintasan keyboard tersebut dilarang.",
-};
-
-type OverlayState =
-  | { kind: "violation"; title: string; message: string; strikes: number }
-  | { kind: "forced"; title: string; message: string; strikes: number }
-  | { kind: "confirm"; title: string; message: string; strikes: number }
-  | { kind: "reconnect"; title: string; message: string; strikes: number };
-
-type ResultState = {
-  score: number;
-  gradingStatus: string;
-  finishedReason: string;
 };
 
 const examStorageKey = (examId: string) => `cbt_exam_${examId}`;
@@ -741,441 +732,28 @@ export default function ExamRunnerPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-100 pb-24">
-      <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur">
-        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-3">
-          <div className="min-w-0">
-            <p className="truncate text-sm font-bold text-slate-900">
-              {payload.exam.title}
-            </p>
-            <p className="text-xs text-slate-500">
-              {answeredCount}/{payload.questions.length} soal terjawab
-            </p>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <div
-              className={`rounded-xl px-3 py-1.5 text-center ${
-                remaining <= 300
-                  ? "bg-rose-50 text-rose-700"
-                  : "bg-slate-100 text-slate-700"
-              }`}
-            >
-              <p className="text-[10px] font-semibold uppercase tracking-wide">
-                Sisa waktu
-              </p>
-              <p className="font-mono text-lg font-bold leading-none">
-                {formatTime(remaining)}
-              </p>
-            </div>
-
-            <div className="rounded-xl bg-amber-50 px-3 py-1.5 text-center text-amber-700">
-              <p className="text-[10px] font-semibold uppercase tracking-wide">
-                Pelanggaran
-              </p>
-              <p className="text-lg font-bold leading-none">
-                {strikes}/{payload.exam.maxStrikes}
-              </p>
-            </div>
-
-            <span
-              className={`hidden rounded-full px-2.5 py-1 text-xs font-semibold sm:inline ${
-                online
-                  ? "bg-emerald-50 text-emerald-700"
-                  : "bg-rose-50 text-rose-700"
-              }`}
-            >
-              {online ? "Online" : "Offline"}
-            </span>
-          </div>
-        </div>
-      </header>
-
-      <main className="mx-auto grid max-w-6xl gap-4 px-4 py-5 lg:grid-cols-[220px_1fr]">
-        <aside className="card h-fit lg:sticky lg:top-24">
-          <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">
-            Navigasi soal
-          </p>
-          <div className="grid grid-cols-6 gap-2 lg:grid-cols-4">
-            {payload.questions.map((question, index) => {
-              const answered = isAnswered(question, answers[question.id]);
-              const flagged = answers[question.id]?.isFlagged;
-              return (
-                <button
-                  key={question.id}
-                  type="button"
-                  onClick={() => setCurrent(index)}
-                  className={`flex h-9 items-center justify-center rounded-lg text-sm font-bold transition ${
-                    index === current
-                      ? "bg-brand-600 text-white"
-                      : flagged
-                        ? "bg-amber-100 text-amber-800"
-                        : answered
-                          ? "bg-emerald-100 text-emerald-800"
-                          : "bg-slate-100 text-slate-500 hover:bg-slate-200"
-                  }`}
-                >
-                  {index + 1}
-                </button>
-              );
-            })}
-          </div>
-
-          <div className="mt-4 space-y-1.5 text-xs text-slate-500">
-            <p>
-              <span className="mr-2 inline-block h-3 w-3 rounded bg-emerald-200 align-middle" />
-              Terjawab
-            </p>
-            <p>
-              <span className="mr-2 inline-block h-3 w-3 rounded bg-amber-200 align-middle" />
-              Ragu-ragu
-            </p>
-            <p>
-              <span className="mr-2 inline-block h-3 w-3 rounded bg-slate-200 align-middle" />
-              Belum dijawab
-            </p>
-          </div>
-        </aside>
-
-        <section className="space-y-4">
-          {currentQuestion && currentAnswer && (
-            <QuestionCard
-              question={currentQuestion}
-              answer={currentAnswer}
-              number={current + 1}
-              onSelectOption={(optionId) =>
-                handleSelectOption(currentQuestion, optionId)
-              }
-              onToggleMulti={(optionId) =>
-                handleToggleMulti(currentQuestion, optionId)
-              }
-              onChangeText={(text) =>
-                handleTextChange(currentQuestion, text)
-              }
-              onChangeNumber={(value) =>
-                handleNumberChange(currentQuestion, value)
-              }
-              onMatchChange={(leftId, rightId) =>
-                handleMatchChange(currentQuestion, leftId, rightId)
-              }
-              onToggleFlag={() => handleToggleFlag(currentQuestion)}
-            />
-          )}
-
-          <div className="flex items-center justify-between gap-3">
-            <button
-              type="button"
-              className="btn-secondary"
-              disabled={current === 0}
-              onClick={() => setCurrent((value) => Math.max(0, value - 1))}
-            >
-              Sebelumnya
-            </button>
-
-            <button
-              type="button"
-              className="btn-secondary"
-              disabled={current >= payload.questions.length - 1}
-              onClick={() =>
-                setCurrent((value) =>
-                  Math.min(payload.questions.length - 1, value + 1),
-                )
-              }
-            >
-              Berikutnya
-            </button>
-          </div>
-        </section>
-      </main>
-
-      <footer className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-white/95 backdrop-blur">
-        <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3">
-          <p className="text-xs text-slate-500">
-            Auto-save aktif. Jangan berpindah aplikasi atau keluar fullscreen.
-          </p>
-          <button
-            type="button"
-            className="btn-primary"
-            disabled={submitting}
-            onClick={() => void submitExam(false)}
-          >
-            {submitting ? "Mengumpulkan..." : "Kumpulkan Jawaban"}
-          </button>
-        </div>
-      </footer>
-
-      {overlay &&
-        typeof document !== "undefined" &&
-        document.getElementById("modal-root") &&
-        createPortal(
-          <LockOverlay
-            overlay={overlay}
-            submitting={submitting}
-            onResume={() => void resumeExam()}
-            onConfirmSubmit={() => void submitExam(true)}
-            onCancel={() => {
-              overlayRef.current = false;
-              setOverlay(null);
-            }}
-            onReconnect={() => void handleReconnect()}
-          />,
-          document.getElementById("modal-root")!,
-        )}
-    </div>
-  );
-}
-
-function LockOverlay({
-  overlay,
-  submitting,
-  onResume,
-  onConfirmSubmit,
-  onCancel,
-  onReconnect,
-}: {
-  overlay: OverlayState;
-  submitting: boolean;
-  onResume: () => void;
-  onConfirmSubmit: () => void;
-  onCancel: () => void;
-  onReconnect: () => void;
-}) {
-  const danger = overlay.kind === "forced";
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4">
-      <div className="w-full max-w-lg rounded-3xl bg-white p-6 shadow-2xl">
-        <div
-          className={`mb-4 flex h-12 w-12 items-center justify-center rounded-2xl text-2xl ${
-            danger ? "bg-rose-100" : "bg-amber-100"
-          }`}
-        >
-          {danger ? "⛔" : overlay.kind === "confirm" ? "📝" : "⚠️"}
-        </div>
-
-        <h2 className="text-xl font-bold text-slate-900">{overlay.title}</h2>
-        <p className="mt-2 text-sm text-slate-600">{overlay.message}</p>
-
-        {overlay.kind !== "confirm" && (
-          <p className="mt-4 rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600">
-            Pelanggaran tercatat:{" "}
-            <span className="font-bold text-slate-900">{overlay.strikes}</span>
-          </p>
-        )}
-
-        <div className="mt-6 flex flex-col gap-2">
-          {overlay.kind === "violation" && (
-            <button type="button" className="btn-primary" onClick={onResume}>
-              Aktifkan Layar Penuh & Lanjutkan
-            </button>
-          )}
-
-          {overlay.kind === "reconnect" && (
-            <button type="button" className="btn-primary" onClick={onReconnect}>
-              Sambung Ulang
-            </button>
-          )}
-
-          {overlay.kind === "confirm" && (
-            <>
-              <button
-                type="button"
-                className="btn-primary"
-                disabled={submitting}
-                onClick={onConfirmSubmit}
-              >
-                {submitting ? "Mengumpulkan..." : "Ya, kumpulkan sekarang"}
-              </button>
-              <button
-                type="button"
-                className="btn-secondary"
-                onClick={onCancel}
-              >
-                Batal
-              </button>
-            </>
-          )}
-
-          {overlay.kind === "forced" && (
-            <p className="text-center text-sm font-semibold text-rose-600">
-              Mengalihkan ke halaman login...
-            </p>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function PreStartScreen({
-  exam,
-  error,
-  starting,
-  onStart,
-  onBack,
-}: {
-  exam: ExamSummary | null;
-  error: string | null;
-  starting: boolean;
-  onStart: () => void;
-  onBack: () => void;
-}) {
-  const finished = exam?.session?.status === "finished";
-  const forced =
-    finished && exam?.session?.finishedReason === "force_submit";
-  const unavailable = !exam;
-
-  return (
-    <div className="flex min-h-screen items-center justify-center bg-slate-900 px-4">
-      <div className="w-full max-w-xl rounded-3xl bg-white p-7 shadow-2xl">
-        <p className="text-xs font-semibold uppercase tracking-wider text-brand-600">
-          Persiapan Ujian
-        </p>
-        <h1 className="mt-1 text-2xl font-bold text-slate-900">
-          {exam?.title ?? "Ujian"}
-        </h1>
-        <p className="mt-1 text-sm text-slate-500">
-          {exam?.subjectName ?? ""} · {exam?.durationMinutes ?? "-"} menit
-        </p>
-
-        <div className="mt-5 space-y-2 rounded-2xl bg-amber-50 p-4 text-sm text-amber-800">
-          <p className="font-semibold">Aturan selama ujian</p>
-          <ul className="list-disc space-y-1 pl-5">
-            <li>Ujian hanya berjalan dalam mode layar penuh.</li>
-            <li>
-              Berpindah tab/aplikasi, keluar fullscreen, atau injeksi ekstensi
-              dicatat sebagai pelanggaran.
-            </li>
-            <li>
-              Maksimal {exam?.maxStrikes ?? 3} pelanggaran. Melebihi batas =
-              jawaban dikumpulkan paksa.
-            </li>
-            <li>Klik kanan, copy/paste, dan shortcut keyboard diblokir.</li>
-            <li>Jawaban tersimpan otomatis setiap kali dipilih.</li>
-          </ul>
-        </div>
-
-        {finished && (
-          <div
-            className={`mt-4 rounded-xl px-4 py-3 text-sm ${
-              forced
-                ? "bg-rose-50 text-rose-700"
-                : "bg-emerald-50 text-emerald-700"
-            }`}
-          >
-            {forced ? (
-              <>
-                Sesi Anda dihentikan karena melebihi batas pelanggaran. Hubungi{" "}
-                <strong>admin/pengawas</strong> untuk mereset sesi agar Anda
-                dapat melanjutkan ujian.
-              </>
-            ) : (
-              <>
-                Anda sudah menyelesaikan ujian ini. Nilai:{" "}
-                <strong>{exam?.session?.score ?? "-"}</strong>
-              </>
-            )}
-          </div>
-        )}
-
-        {error && (
-          <div className="mt-4 rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-700">
-            {error}
-          </div>
-        )}
-
-        <div className="mt-6 flex gap-2">
-          <button type="button" className="btn-secondary" onClick={onBack}>
-            Kembali
-          </button>
-          <button
-            type="button"
-            className="btn-primary flex-1"
-            disabled={starting || finished || unavailable}
-            onClick={onStart}
-          >
-            {starting
-              ? "Menyiapkan..."
-              : unavailable
-                ? "Tidak Tersedia"
-                : finished
-                  ? forced
-                    ? "Menunggu Reset Admin"
-                    : "Sudah Selesai"
-                  : "Mulai Ujian (Layar Penuh)"}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function FinishedScreen({
-  payload,
-  onBack,
-}: {
-  payload: SessionPayload;
-  onBack: () => void;
-}) {
-  return (
-    <div className="flex min-h-screen items-center justify-center bg-slate-100 px-4">
-      <div className="w-full max-w-lg rounded-3xl bg-white p-7 shadow-xl">
-        <h1 className="text-xl font-bold text-slate-900">
-          {payload.session.status === "finished"
-            ? "Ujian Selesai"
-            : "Ujian Tidak Aktif"}
-        </h1>
-        <p className="mt-2 text-sm text-slate-600">
-          {payload.session.finishedReason === "force_submit"
-            ? "Sesi dihentikan karena melebihi batas pelanggaran. Hubungi admin/pengawas untuk mereset sesi agar Anda dapat melanjutkan ujian."
-            : "Sesi ujian ini sudah tidak aktif."}
-        </p>
-        <button type="button" className="btn-primary mt-6" onClick={onBack}>
-          Kembali ke Daftar Ujian
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function ResultScreen({
-  result,
-  examTitle,
-  onBack,
-}: {
-  result: ResultState;
-  examTitle: string;
-  onBack: () => void;
-}) {
-  const partial = result.gradingStatus !== "completed";
-
-  return (
-    <div className="flex min-h-screen items-center justify-center bg-slate-900 px-4">
-      <div className="w-full max-w-lg rounded-3xl bg-white p-8 text-center shadow-2xl">
-        <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-emerald-100 text-3xl">
-          ✓
-        </div>
-        <h1 className="text-2xl font-bold text-slate-900">
-          Jawaban Terkumpul
-        </h1>
-        <p className="mt-1 text-sm text-slate-500">{examTitle}</p>
-
-        <div className="mt-6 rounded-2xl bg-slate-50 p-5">
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-            Nilai
-          </p>
-          <p className="text-4xl font-black text-slate-900">{result.score}</p>
-        </div>
-
-        {partial && (
-          <p className="mt-3 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-700">
-            Sebagian soal (essay) menunggu penilaian manual.
-          </p>
-        )}
-
-        <button type="button" className="btn-primary mt-6 w-full" onClick={onBack}>
-          Kembali ke Daftar Ujian
-        </button>
-      </div>
-    </div>
+    <ExamWorkspace
+      payload={payload}
+      answeredCount={answeredCount}
+      remaining={remaining}
+      strikes={strikes}
+      online={online}
+      current={current}
+      setCurrent={setCurrent}
+      answers={answers}
+      submitting={submitting}
+      submitExam={submitExam}
+      overlay={overlay}
+      overlayRef={overlayRef}
+      setOverlay={setOverlay}
+      resumeExam={resumeExam}
+      handleReconnect={handleReconnect}
+      handleSelectOption={handleSelectOption}
+      handleToggleMulti={handleToggleMulti}
+      handleTextChange={handleTextChange}
+      handleNumberChange={handleNumberChange}
+      handleMatchChange={handleMatchChange}
+      handleToggleFlag={handleToggleFlag}
+    />
   );
 }
