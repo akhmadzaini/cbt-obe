@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { api, apiDownload, apiForm, ApiError } from "../lib/api";
 import { useAuth } from "../lib/auth";
+import { formatDateTime, stripHtml } from "../lib/format";
+import {
+  gradingStatusLabel,
+  sessionStatusLabel,
+  violationTypeLabel,
+} from "../lib/labels";
 import AdminNav from "../components/AdminNav";
 import ExamCreateDialog from "../components/ExamCreateDialog";
 import ExamCancelDialog from "../components/ExamCancelDialog";
@@ -2309,10 +2315,10 @@ export default function AdminPage() {
                                   : "bg-amber-50 text-amber-700"
                             }`}
                           >
-                            {statusLabel(row.status)}
+                            {sessionStatusLabel(row.status)}
                           </span>
                           <span className="ml-2 text-xs text-slate-500">
-                            {gradingLabel(row.gradingStatus)}
+                            {gradingStatusLabel(row.gradingStatus)}
                           </span>
                           {row.finishedReason === "force_submit" && (
                             <span className="mt-1 block text-xs font-semibold text-rose-600">
@@ -2448,7 +2454,7 @@ export default function AdminPage() {
                   Status
                 </p>
                 <p className="mt-1 text-lg font-bold text-brand-800">
-                  {statusLabel(resultDetail.session.status)}
+                  {sessionStatusLabel(resultDetail.session.status)}
                 </p>
               </div>
             </div>
@@ -2470,7 +2476,7 @@ export default function AdminPage() {
                   >
                     <div>
                       <p className="font-semibold text-rose-800">
-                        {violationLabel(violation.violationType)}
+                        {violationTypeLabel(violation.violationType)}
                       </p>
                       <p className="text-xs text-rose-700/80">
                         {formatDateTime(violation.timestamp)} · strike{" "}
@@ -2665,62 +2671,6 @@ export default function AdminPage() {
   );
 }
 
-function formatDateTime(value: string | null): string {
-  if (!value) return "-";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString("id-ID");
-}
-
-function statusLabel(status: string): string {
-  switch (status) {
-    case "started":
-      return "Dimulai";
-    case "in_progress":
-      return "Sedang berjalan";
-    case "finished":
-      return "Selesai";
-    case "suspended":
-      return "Ditangguhkan";
-    default:
-      return status;
-  }
-}
-
-function gradingLabel(status: string): string {
-  switch (status) {
-    case "pending":
-      return "Menunggu";
-    case "partial":
-      return "Sebagian";
-    case "completed":
-      return "Lengkap";
-    default:
-      return status;
-  }
-}
-
-function violationLabel(type: string): string {
-  switch (type) {
-    case "tab_hidden":
-      return "Tab tidak aktif";
-    case "window_blur":
-      return "Jendela keluar fokus";
-    case "fullscreen_exit":
-      return "Keluar layar penuh";
-    case "dom_injection":
-      return "Upaya injeksi";
-    case "contextmenu":
-      return "Klik kanan";
-    case "copy_paste":
-      return "Salin/tempel";
-    case "keyboard_shortcut":
-      return "Pintasan keyboard";
-    default:
-      return type;
-  }
-}
-
 function renderAnswerText(
   question: ExamResultDetail["questions"][number],
   answer: ExamResultDetail["answers"][number] | undefined,
@@ -2821,8 +2771,4 @@ function answerPayloadText(
     if (typeof value === "string" && value.trim()) return value.trim();
   }
   return "";
-}
-
-function stripHtml(value: string): string {
-  return value.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
 }

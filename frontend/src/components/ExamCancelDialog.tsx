@@ -1,4 +1,6 @@
 import type { ExamSummary, ExamUsage } from "../lib/types";
+import { formatDateTime } from "../lib/format";
+import { examStatusLabel } from "../lib/labels";
 
 type Props = {
   exam: ExamSummary;
@@ -9,26 +11,6 @@ type Props = {
   onClose: () => void;
   onConfirm: () => void;
 };
-
-function statusLabel(status: string): string {
-  switch (status) {
-    case "draft":
-      return "Draft";
-    case "published":
-      return "Published";
-    case "archived":
-      return "Arsip";
-    default:
-      return status;
-  }
-}
-
-function formatDateTime(value: string | null): string {
-  if (!value) return "-";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString("id-ID");
-}
 
 export default function ExamCancelDialog({
   exam,
@@ -53,7 +35,7 @@ export default function ExamCancelDialog({
             <h2 className="text-xl font-bold text-slate-900">{exam.title}</h2>
             <p className="mt-1 text-sm text-slate-500">
               {exam.subjectName ?? "Tanpa mapel"} · status:{" "}
-              {statusLabel(exam.status)}
+              {examStatusLabel(exam.status)}
             </p>
           </div>
           <button

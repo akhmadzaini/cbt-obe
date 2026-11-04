@@ -2,15 +2,8 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
+import { formatDate } from "../lib/format";
 import type { ExamSummary } from "../lib/types";
-
-function formatDate(value: string | null): string {
-  if (!value) return "-";
-  return new Date(value).toLocaleString("id-ID", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
-}
 
 export default function ExamListPage() {
   const { user, logout } = useAuth();

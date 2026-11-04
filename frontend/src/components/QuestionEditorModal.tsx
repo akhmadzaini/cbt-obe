@@ -188,14 +188,7 @@ function clampPercent(value: string): number {
   return Math.min(100, Math.max(0, parsed));
 }
 
-function plainText(value: string): string {
-  return value
-    .replace(/<[^>]*>/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-export default function QuestionEditorModal({
+import { stripHtml } from "../lib/format";export default function QuestionEditorModal({
   mode,
   subjectId,
   question,
@@ -600,7 +593,7 @@ export default function QuestionEditorModal({
             />
             {questionText.includes("<") && (
               <p className="mt-1 text-xs text-slate-400">
-                Pratinjau: {plainText(questionText)}
+                Pratinjau: {stripHtml(questionText)}
               </p>
             )}
           </div>

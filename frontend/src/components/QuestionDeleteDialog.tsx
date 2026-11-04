@@ -1,4 +1,6 @@
 import type { AdminQuestion, QuestionUsage } from "../lib/types";
+import { stripHtml } from "../lib/format";
+import { examStatusLabel } from "../lib/labels";
 
 type Props = {
   question: AdminQuestion;
@@ -9,26 +11,6 @@ type Props = {
   onClose: () => void;
   onConfirm: () => void;
 };
-
-function plainText(value: string): string {
-  return value
-    .replace(/<[^>]*>/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function statusLabel(status: string): string {
-  switch (status) {
-    case "draft":
-      return "Draft";
-    case "published":
-      return "Published";
-    case "archived":
-      return "Arsip";
-    default:
-      return status;
-  }
-}
 
 export default function QuestionDeleteDialog({
   question,
@@ -56,7 +38,7 @@ export default function QuestionDeleteDialog({
               Hapus soal ini?
             </h2>
             <p className="mt-1 max-w-xl text-sm text-slate-500">
-              {plainText(question.questionText).slice(0, 220) ||
+              {stripHtml(question.questionText).slice(0, 220) ||
                 "(tanpa teks soal)"}
             </p>
           </div>
@@ -135,7 +117,7 @@ export default function QuestionDeleteDialog({
                           {exam.title}
                         </td>
                         <td className="py-2 pr-4 text-slate-500">
-                          {statusLabel(exam.status)}
+                          {examStatusLabel(exam.status)}
                         </td>
                         <td className="py-2 pr-4 text-slate-600">
                           {exam.sessionCount}
