@@ -24,14 +24,10 @@ import {
   subjects,
   users,
 } from "../db/schema";
-import { authenticate, getClientIp, jwtPlugin, requireRole } from "../lib/auth";
+import { getClientIp } from "../lib/auth";
+import { authPlugin } from "../lib/auth-plugin";
 import { logSystemEvent } from "../lib/audit";
-import {
-  applyRateLimitHeaders,
-  checkRateLimit,
-  RATE_LIMITS,
-  rateLimitMessage,
-} from "../lib/rate-limit";
+import { RATE_LIMITS } from "../lib/rate-limit";
 import { remainingSeconds } from "../lib/session-service";
 import { buildResultsExport } from "../lib/results-export";
 
@@ -48,20 +44,10 @@ function parseOffset(value: string | undefined): number {
 }
 
 export const resultRoutes = new Elysia({ prefix: "/api/results" })
-  .use(jwtPlugin)
+  .use(authPlugin)
   .get(
     "/",
-    async ({ query, headers, request, server, jwt, status }) => {
-      const user = await authenticate({
-        headers,
-        request,
-        server: server as never,
-        jwt,
-      });
-      if (!requireRole(user, ["admin", "teacher"])) {
-        return status(403, { error: "Akses ditolak." });
-      }
-
+    async ({ query }) => {
       const examId = (query.examId ?? "").trim();
       const search = (query.search ?? "").trim();
       const statusFilter = query.status ?? "all";
@@ -175,6 +161,7 @@ export const resultRoutes = new Elysia({ prefix: "/api/results" })
       };
     },
     {
+      auth: { roles: ["admin", "teacher"] },
       query: t.Object({
         examId: t.Optional(t.String()),
         search: t.Optional(t.String()),
@@ -186,30 +173,7 @@ export const resultRoutes = new Elysia({ prefix: "/api/results" })
   )
   .post(
     "/:sessionId/reset",
-    async ({ params, headers, request, server, jwt, status, set }) => {
-      const user = await authenticate({
-        headers,
-        request,
-        server: server as never,
-        jwt,
-      });
-      if (!user) return status(401, { error: "Unauthorized" });
-      if (!requireRole(user, ["admin"])) {
-        return status(403, {
-          error: "Reset sesi hanya dapat dilakukan oleh admin.",
-        });
-      }
-
-      const limit = checkRateLimit(
-        `session-reset:${user.sub}`,
-        RATE_LIMITS.crud.limit,
-        RATE_LIMITS.crud.windowSeconds,
-      );
-      if (!limit.allowed) {
-        applyRateLimitHeaders(set, limit);
-        return status(429, { error: rateLimitMessage(limit) });
-      }
-
+    async ({ params, user, request, server, status }) => {
       const result = await db.transaction(async (tx) => {
         const [session] = await tx
           .select()
@@ -329,7 +293,7 @@ export const resultRoutes = new Elysia({ prefix: "/api/results" })
           restoredStrikeCount: result.restoredStrikeCount,
           reason: "force_submit",
         },
-        ip: getClientIp(request, server as never),
+        ip: getClientIp(request, server),
       });
 
       return {
@@ -340,30 +304,16 @@ export const resultRoutes = new Elysia({ prefix: "/api/results" })
         remainingSeconds: remainingSeconds(result.deadlineAt),
       };
     },
+    {
+      auth: {
+        roles: ["admin"],
+        rateLimit: { name: "session-reset", ...RATE_LIMITS.crud },
+      },
+    },
   )
   .get(
     "/export",
-    async ({ query, headers, request, server, jwt, status, set }) => {
-      const user = await authenticate({
-        headers,
-        request,
-        server: server as never,
-        jwt,
-      });
-      if (!requireRole(user, ["admin", "teacher"])) {
-        return status(403, { error: "Akses ditolak." });
-      }
-
-      const limit = checkRateLimit(
-        `results-export:${user.sub}`,
-        RATE_LIMITS.resultsExport.limit,
-        RATE_LIMITS.resultsExport.windowSeconds,
-      );
-      if (!limit.allowed) {
-        applyRateLimitHeaders(set, limit);
-        return status(429, { error: rateLimitMessage(limit) });
-      }
-
+    async ({ query, status }) => {
       const examId = (query.examId ?? "").trim();
       if (!examId) {
         return status(400, { error: "examId wajib diisi." });
@@ -392,6 +342,10 @@ export const resultRoutes = new Elysia({ prefix: "/api/results" })
       });
     },
     {
+      auth: {
+        roles: ["admin", "teacher"],
+        rateLimit: { name: "results-export", ...RATE_LIMITS.resultsExport },
+      },
       query: t.Object({
         examId: t.Optional(t.String()),
         mode: t.Optional(t.String()),
@@ -400,17 +354,7 @@ export const resultRoutes = new Elysia({ prefix: "/api/results" })
   )
   .get(
     "/:sessionId",
-    async ({ params, headers, request, server, jwt, status }) => {
-      const user = await authenticate({
-        headers,
-        request,
-        server: server as never,
-        jwt,
-      });
-      if (!requireRole(user, ["admin", "teacher"])) {
-        return status(403, { error: "Akses ditolak." });
-      }
-
+    async ({ params, status }) => {
       const [session] = await db
         .select({
           id: examSessions.id,
@@ -544,4 +488,5 @@ export const resultRoutes = new Elysia({ prefix: "/api/results" })
         })),
       };
     },
+    { auth: { roles: ["admin", "teacher"] } },
   );

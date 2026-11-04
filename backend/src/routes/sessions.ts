@@ -10,20 +10,11 @@ import {
   questionOptions,
   examViolationLogs,
 } from "../db/schema";
-import {
-  authenticate,
-  deviceFingerprint,
-  getClientIp,
-  jwtPlugin,
-} from "../lib/auth";
+import { deviceFingerprint, getClientIp } from "../lib/auth";
+import { authPlugin } from "../lib/auth-plugin";
 import { saveUploadedFile } from "../lib/files";
 import { isAssignedToExam } from "../lib/exam-participants";
-import {
-  applyRateLimitHeaders,
-  checkRateLimit,
-  RATE_LIMITS,
-  rateLimitMessage,
-} from "../lib/rate-limit";
+import { RATE_LIMITS } from "../lib/rate-limit";
 import {
   buildSessionPayload,
   finalizeSession,
@@ -62,31 +53,10 @@ type ViolationType =
   | "keyboard_shortcut";
 
 export const sessionRoutes = new Elysia({ prefix: "/api/sessions" })
-  .use(jwtPlugin)
+  .use(authPlugin)
   .post(
     "/start",
-    async ({ body, headers, request, server, jwt, status, set }) => {
-      const user = await authenticate({
-        headers,
-        request,
-        server: server as never,
-        jwt,
-      });
-      if (!user) return status(401, { error: "Unauthorized" });
-      if (user.role !== "student") {
-        return status(403, { error: "Hanya peserta yang dapat memulai ujian." });
-      }
-
-      const limit = checkRateLimit(
-        `session-start:${user.sub}`,
-        RATE_LIMITS.sessionStart.limit,
-        RATE_LIMITS.sessionStart.windowSeconds,
-      );
-      if (!limit.allowed) {
-        applyRateLimitHeaders(set, limit);
-        return status(429, { error: rateLimitMessage(limit) });
-      }
-
+    async ({ body, user, request, server, status }) => {
       const [exam] = await db
         .select()
         .from(exams)
@@ -136,7 +106,7 @@ export const sessionRoutes = new Elysia({ prefix: "/api/sessions" })
       }
 
       const sessionId = randomUUID();
-      const ip = getClientIp(request, server as never);
+      const ip = getClientIp(request, server);
       const userAgent = request.headers.get("user-agent") ?? "";
       const deadlineAt = new Date(
         now.getTime() + exam.durationMinutes * 60_000,
@@ -175,42 +145,26 @@ export const sessionRoutes = new Elysia({ prefix: "/api/sessions" })
 
       return await buildSessionPayload(sessionId, user.sub);
     },
-    { body: t.Object({ examId: t.String() }) },
+    {
+      auth: {
+        roles: ["student"],
+        rateLimit: { name: "session-start", ...RATE_LIMITS.sessionStart },
+      },
+      body: t.Object({ examId: t.String() }),
+    },
   )
-  .get("/:id", async ({ params, headers, request, server, jwt, status }) => {
-    const user = await authenticate({
-      headers,
-      request,
-      server: server as never,
-      jwt,
-    });
-    if (!user) return status(401, { error: "Unauthorized" });
-
-    const payload = await buildSessionPayload(params.id, user.sub);
-    if (!payload) return status(404, { error: "Sesi tidak ditemukan." });
-    return payload;
-  })
+  .get(
+    "/:id",
+    async ({ params, user, status }) => {
+      const payload = await buildSessionPayload(params.id, user.sub);
+      if (!payload) return status(404, { error: "Sesi tidak ditemukan." });
+      return payload;
+    },
+    { auth: true },
+  )
   .put(
     "/:id/answers/:questionId",
-    async ({ params, body, headers, request, server, jwt, status, set }) => {
-      const user = await authenticate({
-        headers,
-        request,
-        server: server as never,
-        jwt,
-      });
-      if (!user) return status(401, { error: "Unauthorized" });
-
-      const limit = checkRateLimit(
-        `answer-save:${user.sub}`,
-        RATE_LIMITS.answerSave.limit,
-        RATE_LIMITS.answerSave.windowSeconds,
-      );
-      if (!limit.allowed) {
-        applyRateLimitHeaders(set, limit);
-        return status(429, { error: rateLimitMessage(limit) });
-      }
-
+    async ({ params, body, user, status }) => {
       const result = await db.transaction(async (tx) => {
         const [session] = await tx
           .select()
@@ -324,6 +278,9 @@ export const sessionRoutes = new Elysia({ prefix: "/api/sessions" })
       return { answer: result.answer };
     },
     {
+      auth: {
+        rateLimit: { name: "answer-save", ...RATE_LIMITS.answerSave },
+      },
       body: t.Object({
         selectedOptionId: t.Optional(t.Union([t.String(), t.Null()])),
         answerPayload: t.Optional(t.Any()),
@@ -333,25 +290,7 @@ export const sessionRoutes = new Elysia({ prefix: "/api/sessions" })
   )
   .post(
     "/:id/violations",
-    async ({ params, body, headers, request, server, jwt, status, set }) => {
-      const user = await authenticate({
-        headers,
-        request,
-        server: server as never,
-        jwt,
-      });
-      if (!user) return status(401, { error: "Unauthorized" });
-
-      const limit = checkRateLimit(
-        `violation:${user.sub}`,
-        RATE_LIMITS.violation.limit,
-        RATE_LIMITS.violation.windowSeconds,
-      );
-      if (!limit.allowed) {
-        applyRateLimitHeaders(set, limit);
-        return status(429, { error: rateLimitMessage(limit) });
-      }
-
+    async ({ params, body, user, status }) => {
       const violationType = String(body.violationType);
       if (!VIOLATION_TYPES.has(violationType)) {
         return status(400, { error: "violationType tidak dikenal." });
@@ -477,6 +416,9 @@ export const sessionRoutes = new Elysia({ prefix: "/api/sessions" })
       return result;
     },
     {
+      auth: {
+        rateLimit: { name: "violation", ...RATE_LIMITS.violation },
+      },
       body: t.Object({
         violationType: t.String(),
         metadata: t.Optional(t.Any()),
@@ -486,15 +428,7 @@ export const sessionRoutes = new Elysia({ prefix: "/api/sessions" })
   )
   .post(
     "/:id/pause",
-    async ({ params, headers, request, server, jwt, status }) => {
-      const user = await authenticate({
-        headers,
-        request,
-        server: server as never,
-        jwt,
-      });
-      if (!user) return status(401, { error: "Unauthorized" });
-
+    async ({ params, user, status }) => {
       const result = await db.transaction(async (tx) => {
         const [session] = await tx
           .select()
@@ -526,18 +460,11 @@ export const sessionRoutes = new Elysia({ prefix: "/api/sessions" })
       if (!result.ok) return status(result.code, { error: result.error });
       return { pausedAt: result.pausedAt };
     },
+    { auth: true },
   )
   .post(
     "/:id/resume",
-    async ({ params, headers, request, server, jwt, status }) => {
-      const user = await authenticate({
-        headers,
-        request,
-        server: server as never,
-        jwt,
-      });
-      if (!user) return status(401, { error: "Unauthorized" });
-
+    async ({ params, user, status }) => {
       const result = await db.transaction(async (tx) => {
         const [session] = await tx
           .select()
@@ -587,28 +514,11 @@ export const sessionRoutes = new Elysia({ prefix: "/api/sessions" })
         remainingSeconds: result.remainingSeconds,
       };
     },
+    { auth: true },
   )
   .post(
     "/:id/heartbeat",
-    async ({ params, headers, request, server, jwt, status, set }) => {
-      const user = await authenticate({
-        headers,
-        request,
-        server: server as never,
-        jwt,
-      });
-      if (!user) return status(401, { error: "Unauthorized" });
-
-      const limit = checkRateLimit(
-        `heartbeat:${user.sub}`,
-        RATE_LIMITS.heartbeat.limit,
-        RATE_LIMITS.heartbeat.windowSeconds,
-      );
-      if (!limit.allowed) {
-        applyRateLimitHeaders(set, limit);
-        return status(429, { error: rateLimitMessage(limit) });
-      }
-
+    async ({ params, user, status }) => {
       const [session] = await db
         .select()
         .from(examSessions)
@@ -636,28 +546,15 @@ export const sessionRoutes = new Elysia({ prefix: "/api/sessions" })
         strikeCount: session.strikeCount,
       };
     },
+    {
+      auth: {
+        rateLimit: { name: "heartbeat", ...RATE_LIMITS.heartbeat },
+      },
+    },
   )
   .post(
     "/:id/submit",
-    async ({ params, headers, request, server, jwt, status, set }) => {
-      const user = await authenticate({
-        headers,
-        request,
-        server: server as never,
-        jwt,
-      });
-      if (!user) return status(401, { error: "Unauthorized" });
-
-      const limit = checkRateLimit(
-        `submit:${user.sub}`,
-        RATE_LIMITS.submit.limit,
-        RATE_LIMITS.submit.windowSeconds,
-      );
-      if (!limit.allowed) {
-        applyRateLimitHeaders(set, limit);
-        return status(429, { error: rateLimitMessage(limit) });
-      }
-
+    async ({ params, user, status }) => {
       const result = await db.transaction(async (tx) => {
         const [session] = await tx
           .select()
@@ -695,18 +592,15 @@ export const sessionRoutes = new Elysia({ prefix: "/api/sessions" })
       if (!result.ok) return status(result.code, { error: result.error });
       return result;
     },
+    {
+      auth: {
+        rateLimit: { name: "submit", ...RATE_LIMITS.submit },
+      },
+    },
   )
   .get(
     "/:id/result",
-    async ({ params, headers, request, server, jwt, status }) => {
-      const user = await authenticate({
-        headers,
-        request,
-        server: server as never,
-        jwt,
-      });
-      if (!user) return status(401, { error: "Unauthorized" });
-
+    async ({ params, user, status }) => {
       const payload = await buildSessionPayload(params.id, user.sub);
       if (!payload) return status(404, { error: "Sesi tidak ditemukan." });
       if (payload.session.status !== "finished") {
@@ -723,4 +617,5 @@ export const sessionRoutes = new Elysia({ prefix: "/api/sessions" })
         },
       };
     },
+    { auth: true },
   );

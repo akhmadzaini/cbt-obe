@@ -9,7 +9,7 @@ import {
   questions,
   users,
 } from "../db/schema";
-import { authenticate, jwtPlugin, requireRole } from "../lib/auth";
+import { authPlugin } from "../lib/auth-plugin";
 
 type GradeFailure = {
   ok: false;
@@ -28,19 +28,11 @@ type GradeSuccess = {
  * saat sesi difinalisasi.
  */
 export const gradingRoutes = new Elysia({ prefix: "/api/grading" })
-  .use(jwtPlugin)
-  .get("/pending", async ({ headers, request, server, jwt, status }) => {
-    const user = await authenticate({
-      headers,
-      request,
-      server: server as never,
-      jwt,
-    });
-    if (!requireRole(user, ["admin", "teacher"])) {
-      return status(403, { error: "Akses ditolak." });
-    }
-
-    const sessionRows = await db
+  .use(authPlugin)
+  .get(
+    "/pending",
+    async () => {
+      const sessionRows = await db
       .select({
         sessionId: examSessions.id,
         examId: examSessions.examId,
@@ -124,20 +116,12 @@ export const gradingRoutes = new Elysia({ prefix: "/api/grading" })
           }),
       })),
     };
-  })
+    },
+    { auth: { roles: ["admin", "teacher"] } },
+  )
   .post(
     "/sessions/:id",
-    async ({ params, body, headers, request, server, jwt, status }) => {
-      const user = await authenticate({
-        headers,
-        request,
-        server: server as never,
-        jwt,
-      });
-      if (!requireRole(user, ["admin", "teacher"])) {
-        return status(403, { error: "Akses ditolak." });
-      }
-
+    async ({ params, body, status }) => {
       const result = await db.transaction(
         async (tx): Promise<GradeFailure | GradeSuccess> => {
           const [session] = await tx
@@ -274,6 +258,7 @@ export const gradingRoutes = new Elysia({ prefix: "/api/grading" })
       return result;
     },
     {
+      auth: { roles: ["admin", "teacher"] },
       body: t.Object({
         grades: t.Array(
           t.Object({

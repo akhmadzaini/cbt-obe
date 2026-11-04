@@ -4,13 +4,8 @@ import ExcelJS from "exceljs";
 import { and, asc, eq, inArray, like, ne, or } from "drizzle-orm";
 import { db } from "../db";
 import { examSessions, users } from "../db/schema";
-import { authenticate, jwtPlugin, requireRole } from "../lib/auth";
-import {
-  applyRateLimitHeaders,
-  checkRateLimit,
-  RATE_LIMITS,
-  rateLimitMessage,
-} from "../lib/rate-limit";
+import { authPlugin } from "../lib/auth-plugin";
+import { RATE_LIMITS } from "../lib/rate-limit";
 
 const MAX_IMPORT_ROWS = 1000;
 const MAX_FILE_BYTES = 5 * 1024 * 1024;
@@ -281,20 +276,10 @@ function isForeignKeyError(error: unknown): boolean {
 }
 
 export const userRoutes = new Elysia({ prefix: "/api/users" })
-  .use(jwtPlugin)
+  .use(authPlugin)
   .get(
     "/",
-    async ({ query, headers, request, server, jwt, status }) => {
-      const user = await authenticate({
-        headers,
-        request,
-        server: server as never,
-        jwt,
-      });
-      if (!requireRole(user, ["admin", "teacher"])) {
-        return status(403, { error: "Akses ditolak." });
-      }
-
+    async ({ query }) => {
       const role =
         query.role === "admin" ||
         query.role === "teacher" ||
@@ -330,6 +315,7 @@ export const userRoutes = new Elysia({ prefix: "/api/users" })
       return { users: rows };
     },
     {
+      auth: { roles: ["admin", "teacher"] },
       query: t.Object({
         role: t.Optional(t.String()),
         search: t.Optional(t.String()),
@@ -338,27 +324,7 @@ export const userRoutes = new Elysia({ prefix: "/api/users" })
   )
   .post(
     "/",
-    async ({ body, headers, request, server, jwt, status, set }) => {
-      const user = await authenticate({
-        headers,
-        request,
-        server: server as never,
-        jwt,
-      });
-      if (!requireRole(user, ["admin", "teacher"])) {
-        return status(403, { error: "Akses ditolak." });
-      }
-
-      const limit = checkRateLimit(
-        `user-create:${user.sub}`,
-        RATE_LIMITS.crud.limit,
-        RATE_LIMITS.crud.windowSeconds,
-      );
-      if (!limit.allowed) {
-        applyRateLimitHeaders(set, limit);
-        return status(429, { error: rateLimitMessage(limit) });
-      }
-
+    async ({ body, status }) => {
       const username = body.username.trim();
       const fullName = body.fullName.trim();
 
@@ -404,6 +370,10 @@ export const userRoutes = new Elysia({ prefix: "/api/users" })
       return { user: created };
     },
     {
+      auth: {
+        roles: ["admin", "teacher"],
+        rateLimit: { name: "user-create", ...RATE_LIMITS.crud },
+      },
       body: t.Object({
         username: t.String(),
         fullName: t.String(),
@@ -414,17 +384,7 @@ export const userRoutes = new Elysia({ prefix: "/api/users" })
   )
   .get(
     "/template",
-    async ({ headers, request, server, jwt, status }) => {
-      const user = await authenticate({
-        headers,
-        request,
-        server: server as never,
-        jwt,
-      });
-      if (!requireRole(user, ["admin", "teacher"])) {
-        return status(403, { error: "Akses ditolak." });
-      }
-
+    async () => {
       const buffer = await buildTemplate();
       return new Response(buffer, {
         headers: {
@@ -436,20 +396,11 @@ export const userRoutes = new Elysia({ prefix: "/api/users" })
         },
       });
     },
+    { auth: { roles: ["admin", "teacher"] } },
   )
   .get(
     "/:id/usage",
-    async ({ params, headers, request, server, jwt, status }) => {
-      const user = await authenticate({
-        headers,
-        request,
-        server: server as never,
-        jwt,
-      });
-      if (!requireRole(user, ["admin", "teacher"])) {
-        return status(403, { error: "Akses ditolak." });
-      }
-
+    async ({ params, status }) => {
       const [target] = await db
         .select({ id: users.id, role: users.role })
         .from(users)
@@ -464,20 +415,11 @@ export const userRoutes = new Elysia({ prefix: "/api/users" })
 
       return await getParticipantUsage(target.id);
     },
+    { auth: { roles: ["admin", "teacher"] } },
   )
   .patch(
     "/:id",
-    async ({ params, body, headers, request, server, jwt, status }) => {
-      const user = await authenticate({
-        headers,
-        request,
-        server: server as never,
-        jwt,
-      });
-      if (!requireRole(user, ["admin", "teacher"])) {
-        return status(403, { error: "Akses ditolak." });
-      }
-
+    async ({ params, body, status }) => {
       const [target] = await db
         .select()
         .from(users)
@@ -549,6 +491,7 @@ export const userRoutes = new Elysia({ prefix: "/api/users" })
       return { user: updated };
     },
     {
+      auth: { roles: ["admin", "teacher"] },
       body: t.Object({
         username: t.Optional(t.String()),
         fullName: t.Optional(t.String()),
@@ -559,17 +502,7 @@ export const userRoutes = new Elysia({ prefix: "/api/users" })
   )
   .delete(
     "/:id",
-    async ({ params, headers, request, server, jwt, status }) => {
-      const user = await authenticate({
-        headers,
-        request,
-        server: server as never,
-        jwt,
-      });
-      if (!requireRole(user, ["admin", "teacher"])) {
-        return status(403, { error: "Akses ditolak." });
-      }
-
+    async ({ params, status }) => {
       const [target] = await db
         .select({ id: users.id, role: users.role })
         .from(users)
@@ -607,30 +540,11 @@ export const userRoutes = new Elysia({ prefix: "/api/users" })
 
       return { ok: true, id: target.id };
     },
+    { auth: { roles: ["admin", "teacher"] } },
   )
   .post(
     "/import",
-    async ({ body, headers, request, server, jwt, status, set }) => {
-      const user = await authenticate({
-        headers,
-        request,
-        server: server as never,
-        jwt,
-      });
-      if (!requireRole(user, ["admin", "teacher"])) {
-        return status(403, { error: "Akses ditolak." });
-      }
-
-      const limit = checkRateLimit(
-        `user-import:${user.sub}`,
-        RATE_LIMITS.userImport.limit,
-        RATE_LIMITS.userImport.windowSeconds,
-      );
-      if (!limit.allowed) {
-        applyRateLimitHeaders(set, limit);
-        return status(429, { error: rateLimitMessage(limit) });
-      }
-
+    async ({ body, status }) => {
       const filename = (body.file.name ?? "").toLowerCase();
       if (!filename.endsWith(".xlsx")) {
         return status(400, {
@@ -897,6 +811,10 @@ export const userRoutes = new Elysia({ prefix: "/api/users" })
       };
     },
     {
+      auth: {
+        roles: ["admin", "teacher"],
+        rateLimit: { name: "user-import", ...RATE_LIMITS.userImport },
+      },
       body: t.Object({
         file: t.File(),
         mode: t.Optional(t.String()),

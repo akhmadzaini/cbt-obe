@@ -12,7 +12,7 @@ import {
   questions,
   subjects,
 } from "../db/schema";
-import { authenticate, jwtPlugin, requireRole } from "../lib/auth";
+import { authPlugin } from "../lib/auth-plugin";
 import {
   ExamParticipantConflictError,
   ExamParticipantError,
@@ -22,12 +22,7 @@ import {
   validateParticipantIds,
 } from "../lib/exam-participants";
 import { getExamUsage, type ExamUsage } from "../lib/exam-usage";
-import {
-  applyRateLimitHeaders,
-  checkRateLimit,
-  RATE_LIMITS,
-  rateLimitMessage,
-} from "../lib/rate-limit";
+import { RATE_LIMITS } from "../lib/rate-limit";
 
 function isRowReferencedError(error: unknown): boolean {
   const code =
@@ -84,17 +79,11 @@ async function loadExamQuestions(examId: string) {
 }
 
 export const examRoutes = new Elysia({ prefix: "/api/exams" })
-  .use(jwtPlugin)
-  .get("/", async ({ headers, request, server, jwt, status }) => {
-    const user = await authenticate({
-      headers,
-      request,
-      server: server as never,
-      jwt,
-    });
-    if (!user) return status(401, { error: "Unauthorized" });
-
-    let examRows: (typeof exams.$inferSelect)[];
+  .use(authPlugin)
+  .get(
+    "/",
+    async ({ user }) => {
+      let examRows: (typeof exams.$inferSelect)[];
 
     if (user.role === "student") {
       const assignedRows = await db
@@ -185,30 +174,12 @@ export const examRoutes = new Elysia({ prefix: "/api/exams" })
           : { participantCount: participantCountMap.get(exam.id) ?? 0 }),
       })),
     };
-  })
+    },
+    { auth: true },
+  )
   .post(
     "/",
-    async ({ body, headers, request, server, jwt, status, set }) => {
-      const user = await authenticate({
-        headers,
-        request,
-        server: server as never,
-        jwt,
-      });
-      if (!requireRole(user, ["admin", "teacher"])) {
-        return status(403, { error: "Akses ditolak." });
-      }
-
-      const limit = checkRateLimit(
-        `exam-create:${user.sub}`,
-        RATE_LIMITS.crud.limit,
-        RATE_LIMITS.crud.windowSeconds,
-      );
-      if (!limit.allowed) {
-        applyRateLimitHeaders(set, limit);
-        return status(429, { error: rateLimitMessage(limit) });
-      }
-
+    async ({ body, user, status }) => {
       const [subject] = await db
         .select()
         .from(subjects)
@@ -278,6 +249,10 @@ export const examRoutes = new Elysia({ prefix: "/api/exams" })
       return { exam: { id: examId } };
     },
     {
+      auth: {
+        roles: ["admin", "teacher"],
+        rateLimit: { name: "exam-create", ...RATE_LIMITS.crud },
+      },
       body: t.Object({
         subjectId: t.String(),
         title: t.String({ minLength: 1, maxLength: 200 }),
@@ -295,17 +270,7 @@ export const examRoutes = new Elysia({ prefix: "/api/exams" })
   )
   .get(
     "/:id/participants",
-    async ({ params, headers, request, server, jwt, status }) => {
-      const user = await authenticate({
-        headers,
-        request,
-        server: server as never,
-        jwt,
-      });
-      if (!requireRole(user, ["admin", "teacher"])) {
-        return status(403, { error: "Akses ditolak." });
-      }
-
+    async ({ params, status }) => {
       const [exam] = await db
         .select({ id: exams.id, title: exams.title, status: exams.status })
         .from(exams)
@@ -315,30 +280,11 @@ export const examRoutes = new Elysia({ prefix: "/api/exams" })
 
       return { exam, ...(await getExamParticipants(exam.id)) };
     },
+    { auth: { roles: ["admin", "teacher"] } },
   )
   .put(
     "/:id/participants",
-    async ({ params, body, headers, request, server, jwt, status, set }) => {
-      const user = await authenticate({
-        headers,
-        request,
-        server: server as never,
-        jwt,
-      });
-      if (!requireRole(user, ["admin", "teacher"])) {
-        return status(403, { error: "Akses ditolak." });
-      }
-
-      const limit = checkRateLimit(
-        `exam-participants:${user.sub}`,
-        RATE_LIMITS.crud.limit,
-        RATE_LIMITS.crud.windowSeconds,
-      );
-      if (!limit.allowed) {
-        applyRateLimitHeaders(set, limit);
-        return status(429, { error: rateLimitMessage(limit) });
-      }
-
+    async ({ params, body, user, status }) => {
       const [exam] = await db
         .select({ id: exams.id, title: exams.title, status: exams.status })
         .from(exams)
@@ -373,6 +319,10 @@ export const examRoutes = new Elysia({ prefix: "/api/exams" })
       return { exam, ...(await getExamParticipants(exam.id)) };
     },
     {
+      auth: {
+        roles: ["admin", "teacher"],
+        rateLimit: { name: "exam-participants", ...RATE_LIMITS.crud },
+      },
       body: t.Object({
         participantIds: t.Array(t.String()),
       }),
@@ -380,56 +330,31 @@ export const examRoutes = new Elysia({ prefix: "/api/exams" })
   )
   .get(
     "/:id/usage",
-    async ({ params, headers, request, server, jwt, status }) => {
-      const user = await authenticate({
-        headers,
-        request,
-        server: server as never,
-        jwt,
-      });
-      if (!requireRole(user, ["admin", "teacher"])) {
-        return status(403, { error: "Akses ditolak." });
-      }
-
+    async ({ params, status }) => {
       const usage = await getExamUsage(params.id);
       if (!usage) return status(404, { error: "Ujian tidak ditemukan." });
 
       return usage;
     },
+    { auth: { roles: ["admin", "teacher"] } },
   )
-  .get("/:id", async ({ params, headers, request, server, jwt, status }) => {
-    const user = await authenticate({
-      headers,
-      request,
-      server: server as never,
-      jwt,
-    });
-    if (!requireRole(user, ["admin", "teacher"])) {
-      return status(403, { error: "Akses ditolak." });
-    }
+  .get(
+    "/:id",
+    async ({ params, status }) => {
+      const [exam] = await db
+        .select()
+        .from(exams)
+        .where(eq(exams.id, params.id))
+        .limit(1);
+      if (!exam) return status(404, { error: "Ujian tidak ditemukan." });
 
-    const [exam] = await db
-      .select()
-      .from(exams)
-      .where(eq(exams.id, params.id))
-      .limit(1);
-    if (!exam) return status(404, { error: "Ujian tidak ditemukan." });
-
-    return { exam, questions: await loadExamQuestions(exam.id) };
-  })
+      return { exam, questions: await loadExamQuestions(exam.id) };
+    },
+    { auth: { roles: ["admin", "teacher"] } },
+  )
   .patch(
     "/:id/status",
-    async ({ params, body, headers, request, server, jwt, status }) => {
-      const user = await authenticate({
-        headers,
-        request,
-        server: server as never,
-        jwt,
-      });
-      if (!requireRole(user, ["admin", "teacher"])) {
-        return status(403, { error: "Akses ditolak." });
-      }
-
+    async ({ params, body, status }) => {
       const [exam] = await db
         .select()
         .from(exams)
@@ -445,6 +370,7 @@ export const examRoutes = new Elysia({ prefix: "/api/exams" })
       return { exam: { id: exam.id, status: body.status } };
     },
     {
+      auth: { roles: ["admin", "teacher"] },
       body: t.Object({
         status: t.Union([
           t.Literal("draft"),
@@ -456,27 +382,7 @@ export const examRoutes = new Elysia({ prefix: "/api/exams" })
   )
   .delete(
     "/:id",
-    async ({ params, headers, request, server, jwt, status, set }) => {
-      const user = await authenticate({
-        headers,
-        request,
-        server: server as never,
-        jwt,
-      });
-      if (!requireRole(user, ["admin", "teacher"])) {
-        return status(403, { error: "Akses ditolak." });
-      }
-
-      const limit = checkRateLimit(
-        `exam-delete:${user.sub}`,
-        RATE_LIMITS.crud.limit,
-        RATE_LIMITS.crud.windowSeconds,
-      );
-      if (!limit.allowed) {
-        applyRateLimitHeaders(set, limit);
-        return status(429, { error: rateLimitMessage(limit) });
-      }
-
+    async ({ params, status }) => {
       type CancelExamResult =
         | { kind: "not_found" }
         | { kind: "conflict"; usage: ExamUsage | null }
@@ -527,20 +433,16 @@ export const examRoutes = new Elysia({ prefix: "/api/exams" })
 
       return { ok: true, id: params.id, title: result.title };
     },
+    {
+      auth: {
+        roles: ["admin", "teacher"],
+        rateLimit: { name: "exam-delete", ...RATE_LIMITS.crud },
+      },
+    },
   )
   .post(
     "/:id/questions",
-    async ({ params, body, headers, request, server, jwt, status }) => {
-      const user = await authenticate({
-        headers,
-        request,
-        server: server as never,
-        jwt,
-      });
-      if (!requireRole(user, ["admin", "teacher"])) {
-        return status(403, { error: "Akses ditolak." });
-      }
-
+    async ({ params, body, status }) => {
       const [exam] = await db
         .select()
         .from(exams)
@@ -583,6 +485,7 @@ export const examRoutes = new Elysia({ prefix: "/api/exams" })
       return { examId: exam.id, questions: await loadExamQuestions(exam.id) };
     },
     {
+      auth: { roles: ["admin", "teacher"] },
       body: t.Object({
         questionIds: t.Array(t.String(), { minItems: 1 }),
       }),
@@ -590,17 +493,7 @@ export const examRoutes = new Elysia({ prefix: "/api/exams" })
   )
   .delete(
     "/:id/questions/:questionId",
-    async ({ params, headers, request, server, jwt, status }) => {
-      const user = await authenticate({
-        headers,
-        request,
-        server: server as never,
-        jwt,
-      });
-      if (!requireRole(user, ["admin", "teacher"])) {
-        return status(403, { error: "Akses ditolak." });
-      }
-
+    async ({ params }) => {
       await db
         .delete(examQuestions)
         .where(
@@ -612,4 +505,5 @@ export const examRoutes = new Elysia({ prefix: "/api/exams" })
 
       return { ok: true };
     },
+    { auth: { roles: ["admin", "teacher"] } },
   );
