@@ -1,14 +1,12 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "../db";
 import {
   examAnswers,
   examQuestions,
   examSessions,
   exams,
-  questionMatchPairs,
-  questionOptions,
-  questions,
 } from "../db/schema";
+import { loadQuestionBundles } from "./question-bundle";
 import { scoreAnswer } from "./scoring";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -81,49 +79,22 @@ export async function buildSessionPayload(sessionId: string, userId: string) {
     .orderBy(examQuestions.orderIndex);
 
   const questionIds = examQuestionRows.map((row) => row.questionId);
-  const questionRows =
-    questionIds.length > 0
-      ? await db
-          .select()
-          .from(questions)
-          .where(inArray(questions.id, questionIds))
-      : [];
-  const optionRows =
-    questionIds.length > 0
-      ? await db
-          .select()
-          .from(questionOptions)
-          .where(inArray(questionOptions.questionId, questionIds))
-          .orderBy(questionOptions.orderIndex)
-      : [];
-  const pairRows =
-    questionIds.length > 0
-      ? await db
-          .select()
-          .from(questionMatchPairs)
-          .where(inArray(questionMatchPairs.questionId, questionIds))
-          .orderBy(questionMatchPairs.orderIndex)
-      : [];
-
-  const questionMap = new Map(questionRows.map((row) => [row.id, row]));
+  const bundles = await loadQuestionBundles(questionIds);
 
   const orderedQuestions = examQuestionRows
     .map((examQuestion) => {
-      const question = questionMap.get(examQuestion.questionId);
-      if (!question) return null;
+      const bundle = bundles.get(examQuestion.questionId);
+      if (!bundle) return null;
+      const { question } = bundle;
 
-      const options = optionRows
-        .filter((option) => option.questionId === question.id)
-        .map((option) => ({
-          id: option.id,
-          label: option.label,
-          text: option.optionText,
-          imageUrl: option.imageUrl,
-        }));
+      const options = bundle.options.map((option) => ({
+        id: option.id,
+        label: option.label,
+        text: option.optionText,
+        imageUrl: option.imageUrl,
+      }));
 
-      const pairs = pairRows.filter(
-        (pair) => pair.questionId === question.id,
-      );
+      const pairs = bundle.matchPairs;
 
       return {
         id: question.id,
@@ -234,32 +205,19 @@ export async function finalizeSession(
   let hasManualGrading = false;
 
   if (questionIds.length > 0) {
-    const questionRows = await tx
-      .select()
-      .from(questions)
-      .where(inArray(questions.id, questionIds));
-    const optionRows = await tx
-      .select()
-      .from(questionOptions)
-      .where(inArray(questionOptions.questionId, questionIds));
-    const pairRows = await tx
-      .select()
-      .from(questionMatchPairs)
-      .where(inArray(questionMatchPairs.questionId, questionIds));
-
-    const questionMap = new Map(questionRows.map((row) => [row.id, row]));
+    const bundles = await loadQuestionBundles(questionIds, tx);
 
     for (const examQuestion of examQuestionRows) {
-      const question = questionMap.get(examQuestion.questionId);
-      if (!question) continue;
+      const bundle = bundles.get(examQuestion.questionId);
+      if (!bundle) continue;
+      const { question } = bundle;
 
       const answer = answerMap.get(question.id);
-      const options = optionRows
-        .filter((option) => option.questionId === question.id)
-        .map((option) => ({ id: option.id, fraction: option.fraction }));
-      const pairIds = pairRows
-        .filter((pair) => pair.questionId === question.id)
-        .map((pair) => pair.id);
+      const options = bundle.options.map((option) => ({
+        id: option.id,
+        fraction: option.fraction,
+      }));
+      const pairIds = bundle.matchPairs.map((pair) => pair.id);
       const points = examQuestion.pointsOverride ?? question.points;
 
       const score = answer

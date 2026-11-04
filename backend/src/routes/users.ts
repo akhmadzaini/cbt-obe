@@ -5,6 +5,7 @@ import { and, asc, eq, inArray, like, ne, or } from "drizzle-orm";
 import { db } from "../db";
 import { examSessions, users } from "../db/schema";
 import { authPlugin } from "../lib/auth-plugin";
+import { isDuplicateEntry, isRowReferencedError } from "../lib/db-errors";
 import { RATE_LIMITS } from "../lib/rate-limit";
 
 const MAX_IMPORT_ROWS = 1000;
@@ -256,23 +257,6 @@ function validateNewPassword(value: string): string | null {
     return "Password harus 8-128 karakter.";
   }
   return null;
-}
-
-function isDuplicateEntry(error: unknown): boolean {
-  return Boolean(
-    error &&
-      typeof error === "object" &&
-      "code" in error &&
-      (error as { code?: string }).code === "ER_DUP_ENTRY",
-  );
-}
-
-function isForeignKeyError(error: unknown): boolean {
-  const code =
-    error && typeof error === "object" && "code" in error
-      ? (error as { code?: string }).code
-      : undefined;
-  return code === "ER_ROW_IS_REFERENCED_2" || code === "ER_ROW_IS_REFERENCED";
 }
 
 export const userRoutes = new Elysia({ prefix: "/api/users" })
@@ -527,7 +511,7 @@ export const userRoutes = new Elysia({ prefix: "/api/users" })
       try {
         await db.delete(users).where(eq(users.id, target.id));
       } catch (error) {
-        if (isForeignKeyError(error)) {
+        if (isRowReferencedError(error)) {
           const latestUsage = await getParticipantUsage(target.id);
           return status(409, {
             error:
