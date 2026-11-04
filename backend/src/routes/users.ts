@@ -3,174 +3,33 @@ import { Elysia, t } from "elysia";
 import ExcelJS from "exceljs";
 import { and, asc, eq, inArray, like, ne, or } from "drizzle-orm";
 import { db } from "../db";
-import { examSessions, users } from "../db/schema";
+import { users } from "../db/schema";
 import { authPlugin } from "../lib/auth-plugin";
 import { isDuplicateEntry, isRowReferencedError } from "../lib/db-errors";
 import { RATE_LIMITS } from "../lib/rate-limit";
 
-const MAX_IMPORT_ROWS = 1000;
-const MAX_FILE_BYTES = 5 * 1024 * 1024;
-const TEMPLATE_FILENAME = "template-import-peserta.xlsx";
+import {
+  ACTIVE_ALIASES,
+  FULLNAME_ALIASES,
+  MAX_FILE_BYTES,
+  MAX_IMPORT_ROWS,
+  PASSWORD_ALIASES,
+  TEMPLATE_FILENAME,
+  USERNAME_ALIASES,
+  buildTemplate,
+  cellText,
+  findColumn,
+  hashPasswords,
+  normalizeHeader,
+  parseActive,
+} from "../lib/participant-import";
+import { getParticipantUsage } from "../lib/participant-usage";
+import {
+  validateFullName,
+  validateNewPassword,
+  validateUsername,
+} from "../lib/participant-validation";
 
-const USERNAME_ALIASES = new Set(["username", "user", "userid", "idpeserta"]);
-const FULLNAME_ALIASES = new Set([
-  "fullname",
-  "namalengkap",
-  "nama",
-  "name",
-]);
-const PASSWORD_ALIASES = new Set(["password", "katasandi", "pass"]);
-const ACTIVE_ALIASES = new Set([
-  "isactive",
-  "aktif",
-  "statusaktif",
-  "aktifyatidak",
-]);
-
-function normalizeHeader(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
-}
-
-function findColumn(
-  headers: Map<string, number>,
-  aliases: Set<string>,
-): number | undefined {
-  for (const [header, column] of headers) {
-    if (aliases.has(header)) return column;
-  }
-  return undefined;
-}
-
-function cellText(row: ExcelJS.Row, column: number | undefined): string {
-  if (!column) return "";
-  return row.getCell(column).text.trim();
-}
-
-function parseActive(value: string): boolean | null {
-  const normalized = value.trim().toLowerCase();
-  if (!normalized) return true;
-  if (["ya", "y", "true", "1", "aktif", "active"].includes(normalized)) {
-    return true;
-  }
-  if (
-    ["tidak", "t", "false", "0", "nonaktif", "inactive"].includes(normalized)
-  ) {
-    return false;
-  }
-  return null;
-}
-
-async function buildTemplate(): Promise<Buffer> {
-  const workbook = new ExcelJS.Workbook();
-  workbook.creator = "CBT";
-  workbook.created = new Date();
-
-  const sheet = workbook.addWorksheet("Peserta", {
-    views: [{ state: "frozen", ySplit: 1 }],
-  });
-  sheet.columns = [
-    { header: "Username", key: "username", width: 26 },
-    { header: "Nama Lengkap", key: "fullName", width: 34 },
-    { header: "Password", key: "password", width: 24 },
-    { header: "Aktif (Ya/Tidak)", key: "isActive", width: 18 },
-  ];
-
-  const header = sheet.getRow(1);
-  header.font = { bold: true, color: { argb: "FFFFFFFF" } };
-  header.fill = {
-    type: "pattern",
-    pattern: "solid",
-    fgColor: { argb: "FF2F56D4" },
-  };
-  header.alignment = { vertical: "middle" };
-  header.height = 24;
-
-  sheet.addRow({
-    username: "siswa001",
-    fullName: "Budi Santoso",
-    password: "rahasia123",
-    isActive: "Ya",
-  });
-  sheet.addRow({
-    username: "siswa002",
-    fullName: "Siti Aminah",
-    password: "rahasia123",
-    isActive: "Ya",
-  });
-
-  sheet.getColumn(1).numFmt = "@";
-  sheet.getColumn(3).numFmt = "@";
-  sheet.autoFilter = { from: "A1", to: "D1" };
-
-  for (let rowNumber = 2; rowNumber <= MAX_IMPORT_ROWS + 1; rowNumber++) {
-    sheet.getCell(`D${rowNumber}`).dataValidation = {
-      type: "list",
-      allowBlank: true,
-      formulae: ['"Ya,Tidak"'],
-      showErrorMessage: true,
-      errorTitle: "Nilai tidak valid",
-      error: "Pilih Ya atau Tidak.",
-    };
-  }
-
-  const guide = workbook.addWorksheet("Petunjuk");
-  guide.columns = [{ width: 24 }, { width: 96 }];
-  guide.addRows([
-    ["Kolom", "Keterangan"],
-    [
-      "Username",
-      "Wajib. Unik, 3-100 karakter, tanpa spasi. Contoh: siswa001 atau NISN.",
-    ],
-    ["Nama Lengkap", "Wajib. Maksimal 150 karakter."],
-    [
-      "Password",
-      "Wajib. Minimal 8 karakter. Password akan di-hash saat import.",
-    ],
-    ["Aktif (Ya/Tidak)", "Opsional. Kosong dianggap Ya."],
-    [],
-    ["Catatan", "Import hanya membuat akun peserta (role student)."],
-    [
-      "",
-      "Username yang sudah ada akan dilewati dan dilaporkan, kecuali memilih mode perbarui.",
-    ],
-    ["", "Baris contoh boleh dihapus sebelum file di-import."],
-  ]);
-  guide.getRow(1).font = { bold: true };
-  guide.getRow(1).fill = {
-    type: "pattern",
-    pattern: "solid",
-    fgColor: { argb: "FFE2E8F0" },
-  };
-  guide.eachRow((row) => {
-    row.getCell(2).alignment = { wrapText: true, vertical: "top" };
-  });
-
-  const buffer = await workbook.xlsx.writeBuffer();
-  return Buffer.from(buffer as ArrayBuffer);
-}
-
-async function hashPasswords(
-  passwords: string[],
-): Promise<Map<string, string>> {
-  const unique = [...new Set(passwords)];
-  const hashes = new Map<string, string>();
-  let cursor = 0;
-
-  const workers = Array.from(
-    { length: Math.min(8, Math.max(1, unique.length)) },
-    async () => {
-      while (cursor < unique.length) {
-        const password = unique[cursor]!;
-        cursor += 1;
-        hashes.set(password, await Bun.password.hash(password));
-      }
-    },
-  );
-  await Promise.all(workers);
-  return hashes;
-}
-
-const USERNAME_PATTERN = /^[A-Za-z0-9._-]+$/;
 
 const publicUserColumns = {
   id: users.id,
@@ -181,83 +40,6 @@ const publicUserColumns = {
   createdAt: users.createdAt,
 };
 
-export type ParticipantUsage = {
-  userId: string;
-  sessionCount: number;
-  activeSessionCount: number;
-  finishedSessionCount: number;
-  lastSessionAt: string | null;
-  canDelete: boolean;
-  reasons: string[];
-};
-
-async function getParticipantUsage(
-  userId: string,
-): Promise<ParticipantUsage> {
-  const rows = await db
-    .select({
-      id: examSessions.id,
-      status: examSessions.status,
-      startedAt: examSessions.startedAt,
-      finishedAt: examSessions.finishedAt,
-    })
-    .from(examSessions)
-    .where(eq(examSessions.userId, userId));
-
-  const activeSessionCount = rows.filter(
-    (row) => row.status === "started" || row.status === "in_progress",
-  ).length;
-  const finishedSessionCount = rows.filter(
-    (row) => row.status === "finished",
-  ).length;
-  const lastSessionAt = rows.reduce<Date | null>((latest, row) => {
-    const candidate = row.finishedAt ?? row.startedAt;
-    if (!candidate) return latest;
-    if (!latest || candidate.getTime() > latest.getTime()) return candidate;
-    return latest;
-  }, null);
-
-  const reasons: string[] = [];
-  if (activeSessionCount > 0) {
-    reasons.push("Peserta memiliki sesi ujian yang sedang berlangsung.");
-  }
-  if (rows.length > 0) {
-    reasons.push(`Peserta sudah memiliki ${rows.length} sesi ujian.`);
-  }
-
-  return {
-    userId,
-    sessionCount: rows.length,
-    activeSessionCount,
-    finishedSessionCount,
-    lastSessionAt: lastSessionAt ? lastSessionAt.toISOString() : null,
-    canDelete: rows.length === 0,
-    reasons,
-  };
-}
-
-function validateUsername(value: string): string | null {
-  if (value.length < 3 || value.length > 100) {
-    return "Username harus 3-100 karakter.";
-  }
-  if (!USERNAME_PATTERN.test(value)) {
-    return "Username hanya boleh berisi huruf, angka, titik, underscore, atau tanda hubung.";
-  }
-  return null;
-}
-
-function validateFullName(value: string): string | null {
-  if (!value) return "Nama lengkap wajib diisi.";
-  if (value.length > 150) return "Nama lengkap maksimal 150 karakter.";
-  return null;
-}
-
-function validateNewPassword(value: string): string | null {
-  if (value.length < 8 || value.length > 128) {
-    return "Password harus 8-128 karakter.";
-  }
-  return null;
-}
 
 export const userRoutes = new Elysia({ prefix: "/api/users" })
   .use(authPlugin)
@@ -805,3 +587,4 @@ export const userRoutes = new Elysia({ prefix: "/api/users" })
       }),
     },
   );
+
