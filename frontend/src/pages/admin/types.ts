@@ -1,15 +1,14 @@
-import type { AdminQuestion } from "../../lib/types";
+import type {
+  AdminQuestion,
+  ExamParticipantRow,
+  ExamSummary,
+  ExamUsage,
+  Participant,
+  ParticipantUsage,
+  QuestionUsage,
+} from "../../lib/types";
 
-export type ImportRow = {
-  id: string;
-  subjectId: string;
-  format: string;
-  originalFilename: string | null;
-  status: string;
-  totalQuestions: number;
-  importedQuestions: number;
-  createdAt: string;
-};
+export type { ImportRow } from "../../lib/types";
 
 export type ExamFormState = {
   title: string;
@@ -24,7 +23,7 @@ export type ExamFormState = {
 export type QuestionEditorState = {
   mode: "create" | "edit";
   question: AdminQuestion | null;
-  usage: import("../../lib/types").QuestionUsage | null;
+  usage: QuestionUsage | null;
   loadingUsage: boolean;
   saving: boolean;
   error: string | null;
@@ -32,7 +31,7 @@ export type QuestionEditorState = {
 
 export type QuestionDeleteState = {
   question: AdminQuestion;
-  usage: import("../../lib/types").QuestionUsage | null;
+  usage: QuestionUsage | null;
   loadingUsage: boolean;
   deleting: boolean;
   error: string | null;
@@ -40,30 +39,30 @@ export type QuestionDeleteState = {
 
 export type ParticipantEditorState = {
   mode: "create" | "edit";
-  participant: import("../../lib/types").Participant | null;
+  participant: Participant | null;
   saving: boolean;
   error: string | null;
 };
 
 export type ParticipantDeleteState = {
-  participant: import("../../lib/types").Participant;
-  usage: import("../../lib/types").ParticipantUsage | null;
+  participant: Participant;
+  usage: ParticipantUsage | null;
   loadingUsage: boolean;
   deleting: boolean;
   error: string | null;
 };
 
 export type ExamParticipantsState = {
-  exam: import("../../lib/types").ExamSummary;
-  participants: import("../../lib/types").ExamParticipantRow[] | null;
+  exam: ExamSummary;
+  participants: ExamParticipantRow[] | null;
   loading: boolean;
   saving: boolean;
   error: string | null;
 };
 
 export type ExamCancelState = {
-  exam: import("../../lib/types").ExamSummary;
-  usage: import("../../lib/types").ExamUsage | null;
+  exam: ExamSummary;
+  usage: ExamUsage | null;
   loadingUsage: boolean;
   cancelling: boolean;
   error: string | null;
