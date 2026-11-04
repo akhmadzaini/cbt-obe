@@ -1,15 +1,8 @@
 import { useMemo, useState } from "react";
-
-export type PickerParticipant = {
-  id: string;
-  username: string;
-  fullName: string;
-  isActive: boolean;
-  sessionCount?: number;
-};
+import type { ParticipantSummary } from "../lib/types";
 
 type Props = {
-  participants: PickerParticipant[];
+  participants: ParticipantSummary[];
   selectedIds: string[];
   onChange: (ids: string[]) => void;
   lockedIds?: Set<string>;
