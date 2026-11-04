@@ -18,177 +18,26 @@ type Props = {
   onSubmit: (input: QuestionInput) => void | Promise<void>;
 };
 
-type OptionDraft = {
-  key: string;
-  id?: string;
-  text: string;
-  fraction: number;
-  feedback: string;
-  hasImage: boolean;
-};
+import {
+  TYPE_OPTIONS,
+  buildAccepted,
+  buildNumerical,
+  buildOptions,
+  buildPairs,
+  clampPercent,
+  newKey,
+  type AcceptedDraft,
+  type OptionDraft,
+  type PairDraft,
+} from "./question-editor/drafts";
+import OptionListEditor from "./question-editor/OptionListEditor";
+import TrueFalseEditor from "./question-editor/TrueFalseEditor";
+import MatchingEditor from "./question-editor/MatchingEditor";
+import AcceptedAnswerEditor from "./question-editor/AcceptedAnswerEditor";
 
-type PairDraft = {
-  key: string;
-  id?: string;
-  left: string;
-  right: string;
-};
+import { stripHtml } from "../lib/format";
 
-type AcceptedDraft = {
-  key: string;
-  text: string;
-  fraction: number;
-};
-
-const TYPE_OPTIONS: { value: QuestionType; label: string }[] = [
-  { value: "multiple_choice", label: "Pilihan ganda" },
-  { value: "multiple_response", label: "Multiple response" },
-  { value: "true_false", label: "Benar / salah" },
-  { value: "matching", label: "Matching" },
-  { value: "short_answer", label: "Isian singkat" },
-  { value: "numerical", label: "Numerik" },
-  { value: "essay", label: "Essay" },
-];
-
-const OPTION_TYPES = new Set<QuestionType>([
-  "multiple_choice",
-  "multiple_response",
-  "true_false",
-]);
-
-let rowCounter = 0;
-function newKey(): string {
-  rowCounter += 1;
-  return `row-${Date.now()}-${rowCounter}`;
-}
-
-function buildOptions(
-  question: AdminQuestion | null,
-  type: QuestionType,
-): OptionDraft[] {
-  if (!OPTION_TYPES.has(type)) return [];
-
-  const existing =
-    question?.questionType === type ? question.options : [];
-
-  if (existing.length > 0) {
-    const drafts = existing.map((option) => ({
-      key: newKey(),
-      id: option.id,
-      text: option.optionText ?? "",
-      fraction: Math.round(Number(option.fraction) * 100),
-      feedback: option.feedback ?? "",
-      hasImage: Boolean(option.imageUrl),
-    }));
-
-    if (type === "true_false" && !drafts.some((option) => option.fraction > 0)) {
-      drafts[0]!.fraction = 100;
-    }
-    return drafts;
-  }
-
-  if (type === "true_false") {
-    return [
-      {
-        key: newKey(),
-        text: "Benar",
-        fraction: 100,
-        feedback: "",
-        hasImage: false,
-      },
-      {
-        key: newKey(),
-        text: "Salah",
-        fraction: 0,
-        feedback: "",
-        hasImage: false,
-      },
-    ];
-  }
-
-  return [0, 1, 2, 3].map((index) => ({
-    key: newKey(),
-    text: "",
-    fraction: index === 0 ? 100 : 0,
-    feedback: "",
-    hasImage: false,
-  }));
-}
-
-function buildPairs(
-  question: AdminQuestion | null,
-  type: QuestionType,
-): PairDraft[] {
-  if (type !== "matching") return [];
-
-  if (
-    question?.questionType === "matching" &&
-    question.matchPairs.length > 0
-  ) {
-    return question.matchPairs.map((pair) => ({
-      key: newKey(),
-      id: pair.id,
-      left: pair.leftText,
-      right: pair.rightText,
-    }));
-  }
-
-  return [0, 1].map(() => ({ key: newKey(), left: "", right: "" }));
-}
-
-function buildAccepted(
-  question: AdminQuestion | null,
-  type: QuestionType,
-): AcceptedDraft[] {
-  if (type !== "short_answer") {
-    return [{ key: newKey(), text: "", fraction: 100 }];
-  }
-
-  const accepted =
-    question?.questionType === "short_answer"
-      ? (
-          question.answerKey as
-            | { accepted?: { text?: string; fraction?: number }[] }
-            | null
-            | undefined
-        )?.accepted
-      : undefined;
-
-  if (Array.isArray(accepted) && accepted.length > 0) {
-    return accepted.map((answer) => ({
-      key: newKey(),
-      text: answer.text ?? "",
-      fraction: Math.round(Number(answer.fraction ?? 1) * 100),
-    }));
-  }
-
-  return [{ key: newKey(), text: "", fraction: 100 }];
-}
-
-function buildNumerical(
-  question: AdminQuestion | null,
-  type: QuestionType,
-): { value: string; tolerance: string } {
-  if (type === "numerical" && question?.questionType === "numerical") {
-    const answerKey = question.answerKey as
-      | { value?: number; tolerance?: number }
-      | null
-      | undefined;
-    return {
-      value: String(answerKey?.value ?? 0),
-      tolerance: String(answerKey?.tolerance ?? 0),
-    };
-  }
-  return { value: "0", tolerance: "0" };
-}
-
-function clampPercent(value: string): number {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) return 0;
-  return Math.min(100, Math.max(0, parsed));
-}
-
-import { stripHtml } from "../lib/format";export default function QuestionEditorModal({
+export default function QuestionEditorModal({
   mode,
   subjectId,
   question,
@@ -619,236 +468,37 @@ import { stripHtml } from "../lib/format";export default function QuestionEditor
           </div>
 
           {showOptionEditor && (
-            <div className="space-y-2">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <p className="label mb-0">Opsi jawaban</p>
-                  <p className="text-xs text-slate-500">
-                    Nilai 100% = benar penuh, 0% = salah. Partial credit boleh
-                    digunakan.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  className="btn-secondary px-3 py-1.5 text-xs"
-                  onClick={addOption}
-                  disabled={options.length >= 26}
-                >
-                  + Opsi
-                </button>
-              </div>
-
-              {options.map((option, index) => (
-                <div
-                  key={option.key}
-                  className="rounded-xl border border-slate-200 p-3"
-                >
-                  <div className="grid gap-2 sm:grid-cols-[1fr_110px_auto]">
-                    <div className="flex items-center gap-2">
-                      <span className="w-6 shrink-0 text-sm font-bold text-slate-600">
-                        {String.fromCharCode(65 + index)}.
-                      </span>
-                      <input
-                        className="input"
-                        value={option.text}
-                        onChange={(event) =>
-                          updateOption(option.key, {
-                            text: event.target.value,
-                          })
-                        }
-                        placeholder="Teks opsi"
-                      />
-                    </div>
-                    <div>
-                      <label className="label">Nilai (%)</label>
-                      <input
-                        type="number"
-                        min={0}
-                        max={100}
-                        step={1}
-                        className="input"
-                        value={option.fraction}
-                        onChange={(event) =>
-                          updateOption(option.key, {
-                            fraction: clampPercent(event.target.value),
-                          })
-                        }
-                      />
-                    </div>
-                    <div className="flex items-end">
-                      <button
-                        type="button"
-                        className="btn-secondary px-3 py-2 text-xs"
-                        onClick={() => removeOption(option.key)}
-                        disabled={options.length <= 2}
-                      >
-                        Hapus
-                      </button>
-                    </div>
-                  </div>
-                  <div className="mt-2">
-                    <input
-                      className="input"
-                      value={option.feedback}
-                      onChange={(event) =>
-                        updateOption(option.key, {
-                          feedback: event.target.value,
-                        })
-                      }
-                      placeholder="Feedback untuk opsi ini (opsional)"
-                    />
-                  </div>
-                  {option.hasImage && (
-                    <p className="mt-1 text-xs text-slate-400">
-                      Gambar opsi yang sudah ada tetap dipertahankan.
-                    </p>
-                  )}
-                </div>
-              ))}
-            </div>
+            <OptionListEditor
+              options={options}
+              addOption={addOption}
+              updateOption={updateOption}
+              removeOption={removeOption}
+            />
           )}
 
           {questionType === "true_false" && (
-            <div className="space-y-2">
-              <p className="label mb-0">Jawaban benar</p>
-              {options.map((option, index) => (
-                <label
-                  key={option.key}
-                  className={`flex cursor-pointer items-center gap-3 rounded-xl border p-3 ${
-                    option.fraction > 0
-                      ? "border-brand-500 bg-brand-50"
-                      : "border-slate-200 bg-white"
-                  }`}
-                >
-                  <input
-                    type="radio"
-                    checked={option.fraction > 0}
-                    onChange={() => setTrueFalseAnswer(index)}
-                  />
-                  <span className="text-sm font-medium text-slate-700">
-                    {index === 0 ? "Benar" : "Salah"}
-                  </span>
-                </label>
-              ))}
-            </div>
+            <TrueFalseEditor
+              options={options}
+              setTrueFalseAnswer={setTrueFalseAnswer}
+            />
           )}
 
           {questionType === "matching" && (
-            <div className="space-y-2">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <p className="label mb-0">Pasangan matching</p>
-                  <p className="text-xs text-slate-500">
-                    Setiap baris adalah satu pasangan kiri dan kanan.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  className="btn-secondary px-3 py-1.5 text-xs"
-                  onClick={addPair}
-                >
-                  + Pasangan
-                </button>
-              </div>
-
-              {pairs.map((pair, index) => (
-                <div
-                  key={pair.key}
-                  className="grid gap-2 rounded-xl border border-slate-200 p-3 sm:grid-cols-[1fr_1fr_auto]"
-                >
-                  <input
-                    className="input"
-                    value={pair.left}
-                    onChange={(event) =>
-                      updatePair(pair.key, { left: event.target.value })
-                    }
-                    placeholder={`Kiri ${index + 1}`}
-                  />
-                  <input
-                    className="input"
-                    value={pair.right}
-                    onChange={(event) =>
-                      updatePair(pair.key, { right: event.target.value })
-                    }
-                    placeholder={`Kanan ${index + 1}`}
-                  />
-                  <div className="flex items-end">
-                    <button
-                      type="button"
-                      className="btn-secondary px-3 py-2 text-xs"
-                      onClick={() => removePair(pair.key)}
-                      disabled={pairs.length <= 2}
-                    >
-                      Hapus
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
+            <MatchingEditor
+              pairs={pairs}
+              addPair={addPair}
+              updatePair={updatePair}
+              removePair={removePair}
+            />
           )}
 
           {questionType === "short_answer" && (
-            <div className="space-y-2">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <p className="label mb-0">Jawaban yang diterima</p>
-                  <p className="text-xs text-slate-500">
-                    Nilai menentukan skor untuk jawaban yang cocok.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  className="btn-secondary px-3 py-1.5 text-xs"
-                  onClick={addAccepted}
-                >
-                  + Jawaban
-                </button>
-              </div>
-
-              {accepted.map((answer) => (
-                <div
-                  key={answer.key}
-                  className="grid gap-2 rounded-xl border border-slate-200 p-3 sm:grid-cols-[1fr_110px_auto]"
-                >
-                  <input
-                    className="input"
-                    value={answer.text}
-                    onChange={(event) =>
-                      updateAccepted(answer.key, {
-                        text: event.target.value,
-                      })
-                    }
-                    placeholder="Teks jawaban"
-                  />
-                  <div>
-                    <label className="label">Nilai (%)</label>
-                    <input
-                      type="number"
-                      min={0}
-                      max={100}
-                      step={1}
-                      className="input"
-                      value={answer.fraction}
-                      onChange={(event) =>
-                        updateAccepted(answer.key, {
-                          fraction: clampPercent(event.target.value),
-                        })
-                      }
-                    />
-                  </div>
-                  <div className="flex items-end">
-                    <button
-                      type="button"
-                      className="btn-secondary px-3 py-2 text-xs"
-                      onClick={() => removeAccepted(answer.key)}
-                      disabled={accepted.length <= 1}
-                    >
-                      Hapus
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
+            <AcceptedAnswerEditor
+              accepted={accepted}
+              addAccepted={addAccepted}
+              updateAccepted={updateAccepted}
+              removeAccepted={removeAccepted}
+            />
           )}
 
           {questionType === "numerical" && (
