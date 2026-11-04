@@ -1,14 +1,13 @@
 import { Elysia, t } from "elysia";
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { db } from "../db";
-import {
-  questionMatchPairs,
-  questionOptions,
-  questions,
-  subjects,
-} from "../db/schema";
+import { questionOptions, questions, subjects } from "../db/schema";
 import { authPlugin } from "../lib/auth-plugin";
 import { removeQuestionUploads, saveUploadedFile } from "../lib/files";
+import {
+  loadQuestionBundles,
+  type QuestionBundle,
+} from "../lib/question-bundle";
 import { getQuestionUsage } from "../lib/question-usage";
 import { RATE_LIMITS } from "../lib/rate-limit";
 import {
@@ -22,28 +21,16 @@ import {
 } from "../lib/questions";
 
 async function loadQuestionDetails(questionIds: string[]) {
-  if (questionIds.length === 0) return [];
+  const bundles = await loadQuestionBundles(questionIds);
 
-  const questionRows = await db
-    .select()
-    .from(questions)
-    .where(inArray(questions.id, questionIds));
-  const optionRows = await db
-    .select()
-    .from(questionOptions)
-    .where(inArray(questionOptions.questionId, questionIds))
-    .orderBy(asc(questionOptions.orderIndex));
-  const pairRows = await db
-    .select()
-    .from(questionMatchPairs)
-    .where(inArray(questionMatchPairs.questionId, questionIds))
-    .orderBy(asc(questionMatchPairs.orderIndex));
-
-  return questionRows.map((question) => ({
-    ...question,
-    options: optionRows.filter((option) => option.questionId === question.id),
-    matchPairs: pairRows.filter((pair) => pair.questionId === question.id),
-  }));
+  return questionIds
+    .map((id) => bundles.get(id))
+    .filter((bundle): bundle is QuestionBundle => Boolean(bundle))
+    .map(({ question, options, matchPairs }) => ({
+      ...question,
+      options,
+      matchPairs,
+    }));
 }
 
 const optionBody = t.Object({

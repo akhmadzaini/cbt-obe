@@ -7,12 +7,11 @@ import {
   examQuestions,
   examSessions,
   exams,
-  questionMatchPairs,
-  questionOptions,
   questions,
   subjects,
 } from "../db/schema";
 import { authPlugin } from "../lib/auth-plugin";
+import { isRowReferencedError } from "../lib/db-errors";
 import {
   ExamParticipantConflictError,
   ExamParticipantError,
@@ -22,15 +21,8 @@ import {
   validateParticipantIds,
 } from "../lib/exam-participants";
 import { getExamUsage, type ExamUsage } from "../lib/exam-usage";
+import { loadQuestionBundles } from "../lib/question-bundle";
 import { RATE_LIMITS } from "../lib/rate-limit";
-
-function isRowReferencedError(error: unknown): boolean {
-  const code =
-    error && typeof error === "object" && "code" in error
-      ? (error as { code?: string }).code
-      : undefined;
-  return code === "ER_ROW_IS_REFERENCED_2" || code === "ER_ROW_IS_REFERENCED";
-}
 
 async function loadExamQuestions(examId: string) {
   const examQuestionRows = await db
@@ -39,40 +31,20 @@ async function loadExamQuestions(examId: string) {
     .where(eq(examQuestions.examId, examId))
     .orderBy(asc(examQuestions.orderIndex));
 
-  const ids = examQuestionRows.map((row) => row.questionId);
-  if (ids.length === 0) return [];
-
-  const questionRows = await db
-    .select()
-    .from(questions)
-    .where(inArray(questions.id, ids));
-  const optionRows = await db
-    .select()
-    .from(questionOptions)
-    .where(inArray(questionOptions.questionId, ids))
-    .orderBy(asc(questionOptions.orderIndex));
-  const pairRows = await db
-    .select()
-    .from(questionMatchPairs)
-    .where(inArray(questionMatchPairs.questionId, ids))
-    .orderBy(asc(questionMatchPairs.orderIndex));
-
-  const questionMap = new Map(questionRows.map((row) => [row.id, row]));
+  const bundles = await loadQuestionBundles(
+    examQuestionRows.map((row) => row.questionId),
+  );
 
   return examQuestionRows
     .map((examQuestion) => {
-      const question = questionMap.get(examQuestion.questionId);
-      if (!question) return null;
+      const bundle = bundles.get(examQuestion.questionId);
+      if (!bundle) return null;
       return {
-        ...question,
-        points: examQuestion.pointsOverride ?? question.points,
+        ...bundle.question,
+        points: examQuestion.pointsOverride ?? bundle.question.points,
         orderIndex: examQuestion.orderIndex,
-        options: optionRows.filter(
-          (option) => option.questionId === question.id,
-        ),
-        matchPairs: pairRows.filter(
-          (pair) => pair.questionId === question.id,
-        ),
+        options: bundle.options,
+        matchPairs: bundle.matchPairs,
       };
     })
     .filter((item): item is NonNullable<typeof item> => item !== null);
