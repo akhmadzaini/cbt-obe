@@ -3,41 +3,16 @@ import { Elysia, t } from "elysia";
 import { desc, eq } from "drizzle-orm";
 import { db } from "../db";
 import { questionImports, subjects } from "../db/schema";
-import { authenticate, jwtPlugin, requireRole } from "../lib/auth";
+import { authPlugin } from "../lib/auth-plugin";
 import { parseQuestions, type ParseError } from "../lib/parsers";
 import { insertParsedQuestion } from "../lib/questions";
-import {
-  applyRateLimitHeaders,
-  checkRateLimit,
-  RATE_LIMITS,
-  rateLimitMessage,
-} from "../lib/rate-limit";
+import { RATE_LIMITS } from "../lib/rate-limit";
 
 export const importRoutes = new Elysia({ prefix: "/api/imports" })
-  .use(jwtPlugin)
+  .use(authPlugin)
   .post(
     "/",
-    async ({ body, headers, request, server, jwt, status, set }) => {
-      const user = await authenticate({
-        headers,
-        request,
-        server: server as never,
-        jwt,
-      });
-      if (!requireRole(user, ["admin", "teacher"])) {
-        return status(403, { error: "Akses ditolak." });
-      }
-
-      const limit = checkRateLimit(
-        `question-import:${user.sub}`,
-        RATE_LIMITS.questionImport.limit,
-        RATE_LIMITS.questionImport.windowSeconds,
-      );
-      if (!limit.allowed) {
-        applyRateLimitHeaders(set, limit);
-        return status(429, { error: rateLimitMessage(limit) });
-      }
-
+    async ({ body, user, status }) => {
       const [subject] = await db
         .select()
         .from(subjects)
@@ -105,6 +80,10 @@ export const importRoutes = new Elysia({ prefix: "/api/imports" })
       };
     },
     {
+      auth: {
+        roles: ["admin", "teacher"],
+        rateLimit: { name: "question-import", ...RATE_LIMITS.questionImport },
+      },
       body: t.Object({
         subjectId: t.String(),
         format: t.Union([t.Literal("aiken"), t.Literal("gift")]),
@@ -112,18 +91,10 @@ export const importRoutes = new Elysia({ prefix: "/api/imports" })
       }),
     },
   )
-  .get("/", async ({ headers, request, server, jwt, status }) => {
-    const user = await authenticate({
-      headers,
-      request,
-      server: server as never,
-      jwt,
-    });
-    if (!requireRole(user, ["admin", "teacher"])) {
-      return status(403, { error: "Akses ditolak." });
-    }
-
-    const rows = await db
+  .get(
+    "/",
+    async () => {
+      const rows = await db
       .select({
         id: questionImports.id,
         subjectId: questionImports.subjectId,
@@ -139,5 +110,7 @@ export const importRoutes = new Elysia({ prefix: "/api/imports" })
       .from(questionImports)
       .orderBy(desc(questionImports.createdAt));
 
-    return { imports: rows };
-  });
+      return { imports: rows };
+    },
+    { auth: { roles: ["admin", "teacher"] } },
+  );

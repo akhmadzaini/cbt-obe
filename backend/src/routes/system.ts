@@ -7,12 +7,8 @@ import type { RowDataPacket } from "mysql2";
 import { db, pool } from "../db";
 import { systemEvents, users } from "../db/schema";
 import { env } from "../env";
-import {
-  authenticate,
-  getClientIp,
-  jwtPlugin,
-  requireRole,
-} from "../lib/auth";
+import { getClientIp } from "../lib/auth";
+import { authPlugin } from "../lib/auth-plugin";
 import { logSystemEvent } from "../lib/audit";
 import {
   backupRoot,
@@ -31,12 +27,7 @@ import {
   isMaintenance,
   maintenanceMessage,
 } from "../lib/maintenance";
-import {
-  applyRateLimitHeaders,
-  checkRateLimit,
-  RATE_LIMITS,
-  rateLimitMessage,
-} from "../lib/rate-limit";
+import { RATE_LIMITS } from "../lib/rate-limit";
 import {
   getActiveJobId,
   getSystemJob,
@@ -111,31 +102,10 @@ function busyResponse(error: unknown) {
 }
 
 export const systemRoutes = new Elysia({ prefix: "/api/system" })
-  .use(jwtPlugin)
+  .use(authPlugin)
   .get(
     "/status",
-    async ({ headers, request, server, jwt, status, set }) => {
-      const user = await authenticate({
-        headers,
-        request,
-        server: server as never,
-        jwt,
-      });
-      if (!user) return status(401, { error: "Unauthorized" });
-      if (!requireRole(user, ["admin"])) {
-        return status(403, { error: "Akses ditolak." });
-      }
-
-      const limit = checkRateLimit(
-        `system-status:${user.sub}`,
-        RATE_LIMITS.systemStatus.limit,
-        RATE_LIMITS.systemStatus.windowSeconds,
-      );
-      if (!limit.allowed) {
-        applyRateLimitHeaders(set, limit);
-        return status(429, { error: rateLimitMessage(limit) });
-      }
-
+    async () => {
       const [dbBytes, uploads, backups, activeSessions] = await Promise.all([
         databaseBytes(),
         uploadsStats(),
@@ -159,62 +129,32 @@ export const systemRoutes = new Elysia({ prefix: "/api/system" })
         maxUploadMb: env.backupMaxUploadMb,
       };
     },
+    {
+      auth: {
+        roles: ["admin"],
+        rateLimit: { name: "system-status", ...RATE_LIMITS.systemStatus },
+      },
+    },
   )
   .get(
     "/backups",
-    async ({ headers, request, server, jwt, status, set }) => {
-      const user = await authenticate({
-        headers,
-        request,
-        server: server as never,
-        jwt,
-      });
-      if (!user) return status(401, { error: "Unauthorized" });
-      if (!requireRole(user, ["admin"])) {
-        return status(403, { error: "Akses ditolak." });
-      }
-
-      const limit = checkRateLimit(
-        `system-status:${user.sub}`,
-        RATE_LIMITS.systemStatus.limit,
-        RATE_LIMITS.systemStatus.windowSeconds,
-      );
-      if (!limit.allowed) {
-        applyRateLimitHeaders(set, limit);
-        return status(429, { error: rateLimitMessage(limit) });
-      }
-
+    async () => {
       return { backups: await listBackups(), activeJobId: getActiveJobId() };
+    },
+    {
+      auth: {
+        roles: ["admin"],
+        rateLimit: { name: "system-status", ...RATE_LIMITS.systemStatus },
+      },
     },
   )
   .post(
     "/backups",
-    async ({ body, headers, request, server, jwt, status, set }) => {
-      const user = await authenticate({
-        headers,
-        request,
-        server: server as never,
-        jwt,
-      });
-      if (!user) return status(401, { error: "Unauthorized" });
-      if (!requireRole(user, ["admin"])) {
-        return status(403, { error: "Akses ditolak." });
-      }
-
-      const limit = checkRateLimit(
-        `system-backup:${user.sub}`,
-        RATE_LIMITS.systemBackup.limit,
-        RATE_LIMITS.systemBackup.windowSeconds,
-      );
-      if (!limit.allowed) {
-        applyRateLimitHeaders(set, limit);
-        return status(429, { error: rateLimitMessage(limit) });
-      }
-
+    async ({ body, user, request, server, status }) => {
       const admin = await loadAdmin(user.sub);
       if (!admin) return status(401, { error: "Unauthorized" });
 
-      const ip = getClientIp(request, server as never);
+      const ip = getClientIp(request, server);
       const includeUploads = body?.includeUploads ?? true;
 
       try {
@@ -248,6 +188,10 @@ export const systemRoutes = new Elysia({ prefix: "/api/system" })
       }
     },
     {
+      auth: {
+        roles: ["admin"],
+        rateLimit: { name: "system-backup", ...RATE_LIMITS.systemBackup },
+      },
       body: t.Object({
         includeUploads: t.Optional(t.Boolean()),
       }),
@@ -255,28 +199,7 @@ export const systemRoutes = new Elysia({ prefix: "/api/system" })
   )
   .get(
     "/backups/:id/download",
-    async ({ params, headers, request, server, jwt, status, set }) => {
-      const user = await authenticate({
-        headers,
-        request,
-        server: server as never,
-        jwt,
-      });
-      if (!user) return status(401, { error: "Unauthorized" });
-      if (!requireRole(user, ["admin"])) {
-        return status(403, { error: "Akses ditolak." });
-      }
-
-      const limit = checkRateLimit(
-        `system-download:${user.sub}`,
-        RATE_LIMITS.systemDownload.limit,
-        RATE_LIMITS.systemDownload.windowSeconds,
-      );
-      if (!limit.allowed) {
-        applyRateLimitHeaders(set, limit);
-        return status(429, { error: rateLimitMessage(limit) });
-      }
-
+    async ({ params, user, request, server, status }) => {
       let resolved: { name: string; filePath: string };
       try {
         resolved = resolveBackupPath(params.id);
@@ -294,7 +217,7 @@ export const systemRoutes = new Elysia({ prefix: "/api/system" })
         actorUsername: admin?.username ?? "admin",
         action: "backup.download",
         detail: { name: resolved.name },
-        ip: getClientIp(request, server as never),
+        ip: getClientIp(request, server),
       });
 
       return new Response(Bun.file(resolved.filePath), {
@@ -305,31 +228,16 @@ export const systemRoutes = new Elysia({ prefix: "/api/system" })
         },
       });
     },
+    {
+      auth: {
+        roles: ["admin"],
+        rateLimit: { name: "system-download", ...RATE_LIMITS.systemDownload },
+      },
+    },
   )
   .delete(
     "/backups/:id",
-    async ({ params, headers, request, server, jwt, status, set }) => {
-      const user = await authenticate({
-        headers,
-        request,
-        server: server as never,
-        jwt,
-      });
-      if (!user) return status(401, { error: "Unauthorized" });
-      if (!requireRole(user, ["admin"])) {
-        return status(403, { error: "Akses ditolak." });
-      }
-
-      const limit = checkRateLimit(
-        `system-download:${user.sub}`,
-        RATE_LIMITS.systemDownload.limit,
-        RATE_LIMITS.systemDownload.windowSeconds,
-      );
-      if (!limit.allowed) {
-        applyRateLimitHeaders(set, limit);
-        return status(429, { error: rateLimitMessage(limit) });
-      }
-
+    async ({ params, user, request, server, status }) => {
       let resolved: { name: string; filePath: string };
       try {
         resolved = resolveBackupPath(params.id);
@@ -348,36 +256,21 @@ export const systemRoutes = new Elysia({ prefix: "/api/system" })
         actorUsername: admin?.username ?? "admin",
         action: "backup.delete",
         detail: { name: resolved.name },
-        ip: getClientIp(request, server as never),
+        ip: getClientIp(request, server),
       });
 
       return { ok: true };
     },
+    {
+      auth: {
+        roles: ["admin"],
+        rateLimit: { name: "system-download", ...RATE_LIMITS.systemDownload },
+      },
+    },
   )
   .post(
     "/backups/:id/restore",
-    async ({ params, body, headers, request, server, jwt, status, set }) => {
-      const user = await authenticate({
-        headers,
-        request,
-        server: server as never,
-        jwt,
-      });
-      if (!user) return status(401, { error: "Unauthorized" });
-      if (!requireRole(user, ["admin"])) {
-        return status(403, { error: "Akses ditolak." });
-      }
-
-      const limit = checkRateLimit(
-        `system-restore:${user.sub}`,
-        RATE_LIMITS.systemRestore.limit,
-        RATE_LIMITS.systemRestore.windowSeconds,
-      );
-      if (!limit.allowed) {
-        applyRateLimitHeaders(set, limit);
-        return status(429, { error: rateLimitMessage(limit) });
-      }
-
+    async ({ params, body, user, request, server, status }) => {
       const admin = await loadAdmin(user.sub);
       if (!admin) return status(401, { error: "Unauthorized" });
       if (!(await verifyPassword(admin.id, body.password))) {
@@ -394,7 +287,7 @@ export const systemRoutes = new Elysia({ prefix: "/api/system" })
         return status(404, { error: "Backup tidak ditemukan." });
       }
 
-      const ip = getClientIp(request, server as never);
+      const ip = getClientIp(request, server);
       const scope = body.scope as BackupScope;
 
       try {
@@ -465,6 +358,10 @@ export const systemRoutes = new Elysia({ prefix: "/api/system" })
       }
     },
     {
+      auth: {
+        roles: ["admin"],
+        rateLimit: { name: "system-restore", ...RATE_LIMITS.systemRestore },
+      },
       body: t.Object({
         scope: t.Union([
           t.Literal("full"),
@@ -477,28 +374,7 @@ export const systemRoutes = new Elysia({ prefix: "/api/system" })
   )
   .post(
     "/restore",
-    async ({ body, headers, request, server, jwt, status, set }) => {
-      const user = await authenticate({
-        headers,
-        request,
-        server: server as never,
-        jwt,
-      });
-      if (!user) return status(401, { error: "Unauthorized" });
-      if (!requireRole(user, ["admin"])) {
-        return status(403, { error: "Akses ditolak." });
-      }
-
-      const limit = checkRateLimit(
-        `system-restore:${user.sub}`,
-        RATE_LIMITS.systemRestore.limit,
-        RATE_LIMITS.systemRestore.windowSeconds,
-      );
-      if (!limit.allowed) {
-        applyRateLimitHeaders(set, limit);
-        return status(429, { error: rateLimitMessage(limit) });
-      }
-
+    async ({ body, user, request, server, status }) => {
       const admin = await loadAdmin(user.sub);
       if (!admin) return status(401, { error: "Unauthorized" });
       if (!(await verifyPassword(admin.id, body.password))) {
@@ -523,7 +399,7 @@ export const systemRoutes = new Elysia({ prefix: "/api/system" })
       );
       await Bun.write(archivePath, body.file);
 
-      const ip = getClientIp(request, server as never);
+      const ip = getClientIp(request, server);
       const scope = body.scope as BackupScope;
 
       try {
@@ -593,6 +469,10 @@ export const systemRoutes = new Elysia({ prefix: "/api/system" })
       }
     },
     {
+      auth: {
+        roles: ["admin"],
+        rateLimit: { name: "system-restore", ...RATE_LIMITS.systemRestore },
+      },
       body: t.Object({
         file: t.File(),
         scope: t.Union([
@@ -606,47 +486,16 @@ export const systemRoutes = new Elysia({ prefix: "/api/system" })
   )
   .get(
     "/jobs/:id",
-    async ({ params, headers, request, server, jwt, status }) => {
-      const user = await authenticate({
-        headers,
-        request,
-        server: server as never,
-        jwt,
-      });
-      if (!user) return status(401, { error: "Unauthorized" });
-      if (!requireRole(user, ["admin"])) {
-        return status(403, { error: "Akses ditolak." });
-      }
-
+    async ({ params, status }) => {
       const job = await getSystemJob(params.id);
       if (!job) return status(404, { error: "Job tidak ditemukan." });
       return { job };
     },
+    { auth: { roles: ["admin"] } },
   )
   .post(
     "/reset",
-    async ({ body, headers, request, server, jwt, status, set }) => {
-      const user = await authenticate({
-        headers,
-        request,
-        server: server as never,
-        jwt,
-      });
-      if (!user) return status(401, { error: "Unauthorized" });
-      if (!requireRole(user, ["admin"])) {
-        return status(403, { error: "Akses ditolak." });
-      }
-
-      const limit = checkRateLimit(
-        `system-reset:${user.sub}`,
-        RATE_LIMITS.systemReset.limit,
-        RATE_LIMITS.systemReset.windowSeconds,
-      );
-      if (!limit.allowed) {
-        applyRateLimitHeaders(set, limit);
-        return status(429, { error: rateLimitMessage(limit) });
-      }
-
+    async ({ body, user, request, server, status }) => {
       if (body.confirmation !== RESET_CONFIRMATION) {
         return status(400, {
           error: `Ketik ${RESET_CONFIRMATION} untuk mengonfirmasi reset.`,
@@ -659,7 +508,7 @@ export const systemRoutes = new Elysia({ prefix: "/api/system" })
         return status(403, { error: "Password salah." });
       }
 
-      const ip = getClientIp(request, server as never);
+      const ip = getClientIp(request, server);
 
       try {
         const job = await startSystemJob("reset", async (reporter) => {
@@ -716,39 +565,31 @@ export const systemRoutes = new Elysia({ prefix: "/api/system" })
       }
     },
     {
+      auth: {
+        roles: ["admin"],
+        rateLimit: { name: "system-reset", ...RATE_LIMITS.systemReset },
+      },
       body: t.Object({
         confirmation: t.String({ minLength: 1, maxLength: 50 }),
         password: t.String({ minLength: 1, maxLength: 128 }),
       }),
     },
   )
-  .get("/events", async ({ headers, request, server, jwt, status, set }) => {
-    const user = await authenticate({
-      headers,
-      request,
-      server: server as never,
-      jwt,
-    });
-    if (!user) return status(401, { error: "Unauthorized" });
-    if (!requireRole(user, ["admin"])) {
-      return status(403, { error: "Akses ditolak." });
-    }
+  .get(
+    "/events",
+    async () => {
+      const events = await db
+        .select()
+        .from(systemEvents)
+        .orderBy(desc(systemEvents.createdAt))
+        .limit(100);
 
-    const limit = checkRateLimit(
-      `system-status:${user.sub}`,
-      RATE_LIMITS.systemStatus.limit,
-      RATE_LIMITS.systemStatus.windowSeconds,
-    );
-    if (!limit.allowed) {
-      applyRateLimitHeaders(set, limit);
-      return status(429, { error: rateLimitMessage(limit) });
-    }
-
-    const events = await db
-      .select()
-      .from(systemEvents)
-      .orderBy(desc(systemEvents.createdAt))
-      .limit(100);
-
-    return { events };
-  });
+      return { events };
+    },
+    {
+      auth: {
+        roles: ["admin"],
+        rateLimit: { name: "system-status", ...RATE_LIMITS.systemStatus },
+      },
+    },
+  );

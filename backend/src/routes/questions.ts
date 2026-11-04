@@ -7,15 +7,10 @@ import {
   questions,
   subjects,
 } from "../db/schema";
-import { authenticate, jwtPlugin, requireRole } from "../lib/auth";
+import { authPlugin } from "../lib/auth-plugin";
 import { removeQuestionUploads, saveUploadedFile } from "../lib/files";
 import { getQuestionUsage } from "../lib/question-usage";
-import {
-  applyRateLimitHeaders,
-  checkRateLimit,
-  RATE_LIMITS,
-  rateLimitMessage,
-} from "../lib/rate-limit";
+import { RATE_LIMITS } from "../lib/rate-limit";
 import {
   createQuestion,
   deleteQuestion,
@@ -76,51 +71,25 @@ const questionContentBody = {
 };
 
 export const questionRoutes = new Elysia({ prefix: "/api/questions" })
-  .use(jwtPlugin)
-  .get("/", async ({ query, headers, request, server, jwt, status }) => {
-    const user = await authenticate({
-      headers,
-      request,
-      server: server as never,
-      jwt,
-    });
-    if (!requireRole(user, ["admin", "teacher"])) {
-      return status(403, { error: "Akses ditolak." });
-    }
+  .use(authPlugin)
+  .get(
+    "/",
+    async ({ query }) => {
+      const subjectId = query.subjectId;
+      const rows = await db
+        .select()
+        .from(questions)
+        .where(subjectId ? eq(questions.subjectId, subjectId) : undefined)
+        .orderBy(desc(questions.createdAt));
 
-    const subjectId = query.subjectId;
-    const rows = await db
-      .select()
-      .from(questions)
-      .where(subjectId ? eq(questions.subjectId, subjectId) : undefined)
-      .orderBy(desc(questions.createdAt));
-
-    const details = await loadQuestionDetails(rows.map((row) => row.id));
-    return { questions: details };
-  })
+      const details = await loadQuestionDetails(rows.map((row) => row.id));
+      return { questions: details };
+    },
+    { auth: { roles: ["admin", "teacher"] } },
+  )
   .post(
     "/",
-    async ({ body, headers, request, server, jwt, status, set }) => {
-      const user = await authenticate({
-        headers,
-        request,
-        server: server as never,
-        jwt,
-      });
-      if (!requireRole(user, ["admin", "teacher"])) {
-        return status(403, { error: "Akses ditolak." });
-      }
-
-      const limit = checkRateLimit(
-        `question-create:${user.sub}`,
-        RATE_LIMITS.crud.limit,
-        RATE_LIMITS.crud.windowSeconds,
-      );
-      if (!limit.allowed) {
-        applyRateLimitHeaders(set, limit);
-        return status(429, { error: rateLimitMessage(limit) });
-      }
-
+    async ({ body, status }) => {
       const [subject] = await db
         .select({ id: subjects.id })
         .from(subjects)
@@ -143,45 +112,33 @@ export const questionRoutes = new Elysia({ prefix: "/api/questions" })
       }
     },
     {
+      auth: {
+        roles: ["admin", "teacher"],
+        rateLimit: { name: "question-create", ...RATE_LIMITS.crud },
+      },
       body: t.Object({
         subjectId: t.String(),
         ...questionContentBody,
       }),
     },
   )
-  .get("/:id/usage", async ({ params, headers, request, server, jwt, status }) => {
-    const user = await authenticate({
-      headers,
-      request,
-      server: server as never,
-      jwt,
-    });
-    if (!requireRole(user, ["admin", "teacher"])) {
-      return status(403, { error: "Akses ditolak." });
-    }
+  .get(
+    "/:id/usage",
+    async ({ params, status }) => {
+      const [question] = await db
+        .select({ id: questions.id })
+        .from(questions)
+        .where(eq(questions.id, params.id))
+        .limit(1);
+      if (!question) return status(404, { error: "Soal tidak ditemukan." });
 
-    const [question] = await db
-      .select({ id: questions.id })
-      .from(questions)
-      .where(eq(questions.id, params.id))
-      .limit(1);
-    if (!question) return status(404, { error: "Soal tidak ditemukan." });
-
-    return await getQuestionUsage(question.id);
-  })
+      return await getQuestionUsage(question.id);
+    },
+    { auth: { roles: ["admin", "teacher"] } },
+  )
   .patch(
     "/:id",
-    async ({ params, body, headers, request, server, jwt, status }) => {
-      const user = await authenticate({
-        headers,
-        request,
-        server: server as never,
-        jwt,
-      });
-      if (!requireRole(user, ["admin", "teacher"])) {
-        return status(403, { error: "Akses ditolak." });
-      }
-
+    async ({ params, body, status }) => {
       try {
         await updateQuestion(params.id, body as unknown as QuestionInput);
         const [question] = await loadQuestionDetails([params.id]);
@@ -200,21 +157,14 @@ export const questionRoutes = new Elysia({ prefix: "/api/questions" })
         throw error;
       }
     },
-    { body: t.Object({ ...questionContentBody }) },
+    {
+      auth: { roles: ["admin", "teacher"] },
+      body: t.Object({ ...questionContentBody }),
+    },
   )
   .delete(
     "/:id",
-    async ({ params, headers, request, server, jwt, status }) => {
-      const user = await authenticate({
-        headers,
-        request,
-        server: server as never,
-        jwt,
-      });
-      if (!requireRole(user, ["admin", "teacher"])) {
-        return status(403, { error: "Akses ditolak." });
-      }
-
+    async ({ params, status }) => {
       try {
         await deleteQuestion(params.id);
       } catch (error) {
@@ -231,45 +181,20 @@ export const questionRoutes = new Elysia({ prefix: "/api/questions" })
       await removeQuestionUploads(params.id);
       return { ok: true, id: params.id };
     },
+    { auth: { roles: ["admin", "teacher"] } },
   )
-  .get("/:id", async ({ params, headers, request, server, jwt, status }) => {
-    const user = await authenticate({
-      headers,
-      request,
-      server: server as never,
-      jwt,
-    });
-    if (!requireRole(user, ["admin", "teacher"])) {
-      return status(403, { error: "Akses ditolak." });
-    }
-
-    const [question] = await loadQuestionDetails([params.id]);
-    if (!question) return status(404, { error: "Soal tidak ditemukan." });
-    return { question };
-  })
+  .get(
+    "/:id",
+    async ({ params, status }) => {
+      const [question] = await loadQuestionDetails([params.id]);
+      if (!question) return status(404, { error: "Soal tidak ditemukan." });
+      return { question };
+    },
+    { auth: { roles: ["admin", "teacher"] } },
+  )
   .post(
     "/:id/image",
-    async ({ params, body, headers, request, server, jwt, status, set }) => {
-      const user = await authenticate({
-        headers,
-        request,
-        server: server as never,
-        jwt,
-      });
-      if (!requireRole(user, ["admin", "teacher"])) {
-        return status(403, { error: "Akses ditolak." });
-      }
-
-      const limit = checkRateLimit(
-        `question-image:${user.sub}`,
-        RATE_LIMITS.imageUpload.limit,
-        RATE_LIMITS.imageUpload.windowSeconds,
-      );
-      if (!limit.allowed) {
-        applyRateLimitHeaders(set, limit);
-        return status(429, { error: rateLimitMessage(limit) });
-      }
-
+    async ({ params, body, status }) => {
       const [question] = await db
         .select({ id: questions.id })
         .from(questions)
@@ -293,31 +218,17 @@ export const questionRoutes = new Elysia({ prefix: "/api/questions" })
 
       return { questionId: question.id, imageUrl };
     },
-    { body: t.Object({ file: t.File() }) },
+    {
+      auth: {
+        roles: ["admin", "teacher"],
+        rateLimit: { name: "question-image", ...RATE_LIMITS.imageUpload },
+      },
+      body: t.Object({ file: t.File() }),
+    },
   )
   .post(
     "/:id/options/:optionId/image",
-    async ({ params, body, headers, request, server, jwt, status, set }) => {
-      const user = await authenticate({
-        headers,
-        request,
-        server: server as never,
-        jwt,
-      });
-      if (!requireRole(user, ["admin", "teacher"])) {
-        return status(403, { error: "Akses ditolak." });
-      }
-
-      const limit = checkRateLimit(
-        `question-image:${user.sub}`,
-        RATE_LIMITS.imageUpload.limit,
-        RATE_LIMITS.imageUpload.windowSeconds,
-      );
-      if (!limit.allowed) {
-        applyRateLimitHeaders(set, limit);
-        return status(429, { error: rateLimitMessage(limit) });
-      }
-
+    async ({ params, body, status }) => {
       const [option] = await db
         .select({ id: questionOptions.id })
         .from(questionOptions)
@@ -349,5 +260,11 @@ export const questionRoutes = new Elysia({ prefix: "/api/questions" })
 
       return { optionId: option.id, imageUrl };
     },
-    { body: t.Object({ file: t.File() }) },
+    {
+      auth: {
+        roles: ["admin", "teacher"],
+        rateLimit: { name: "question-image", ...RATE_LIMITS.imageUpload },
+      },
+      body: t.Object({ file: t.File() }),
+    },
   );

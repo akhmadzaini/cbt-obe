@@ -2,12 +2,8 @@ import { Elysia, t } from "elysia";
 import { eq } from "drizzle-orm";
 import { db } from "../db";
 import { users } from "../db/schema";
-import {
-  authenticate,
-  deviceFingerprint,
-  getClientIp,
-  jwtPlugin,
-} from "../lib/auth";
+import { deviceFingerprint, getClientIp } from "../lib/auth";
+import { authPlugin } from "../lib/auth-plugin";
 import {
   applyRateLimitHeaders,
   checkLoginRateLimit,
@@ -16,11 +12,11 @@ import {
 } from "../lib/rate-limit";
 
 export const authRoutes = new Elysia({ prefix: "/api/auth" })
-  .use(jwtPlugin)
+  .use(authPlugin)
   .post(
     "/login",
     async ({ body, jwt, request, server, status, set }) => {
-      const ip = getClientIp(request, server as never);
+      const ip = getClientIp(request, server);
       const limit = checkLoginRateLimit(ip, body.username);
       if (!limit.allowed) {
         applyRateLimitHeaders(set, limit);
@@ -71,29 +67,25 @@ export const authRoutes = new Elysia({ prefix: "/api/auth" })
       }),
     },
   )
-  .get("/me", async ({ headers, request, server, jwt, status }) => {
-    const authUser = await authenticate({
-      headers,
-      request,
-      server: server as never,
-      jwt,
-    });
-    if (!authUser) return status(401, { error: "Unauthorized" });
+  .get(
+    "/me",
+    async ({ user: authUser, status }) => {
+      const [user] = await db
+        .select()
+        .from(users)
+        .where(eq(users.id, authUser.sub))
+        .limit(1);
 
-    const [user] = await db
-      .select()
-      .from(users)
-      .where(eq(users.id, authUser.sub))
-      .limit(1);
+      if (!user) return status(401, { error: "Unauthorized" });
 
-    if (!user) return status(401, { error: "Unauthorized" });
-
-    return {
-      user: {
-        id: user.id,
-        username: user.username,
-        fullName: user.fullName,
-        role: user.role,
-      },
-    };
-  });
+      return {
+        user: {
+          id: user.id,
+          username: user.username,
+          fullName: user.fullName,
+          role: user.role,
+        },
+      };
+    },
+    { auth: true },
+  );
