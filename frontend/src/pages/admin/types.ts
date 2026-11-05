@@ -6,6 +6,7 @@ import type {
   Participant,
   ParticipantUsage,
   QuestionUsage,
+  SessionCancelUsage,
 } from "../../lib/types";
 
 export type { ImportRow } from "../../lib/types";
@@ -75,6 +76,14 @@ export type SessionResetState = {
   examTitle: string;
   strikeCount: number;
   resetting: boolean;
+  error: string | null;
+};
+
+export type SessionCancelState = {
+  sessionId: string;
+  usage: SessionCancelUsage | null;
+  loadingUsage: boolean;
+  cancelling: boolean;
   error: string | null;
 };
 

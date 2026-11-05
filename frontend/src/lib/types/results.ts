@@ -21,6 +21,26 @@ export type ExamResultRow = {
   lastViolationAt: string | null;
 };
 
+export type SessionCancelUsage = {
+  sessionId: string;
+  examId: string;
+  examTitle: string;
+  examStatus: "draft" | "published" | "archived";
+  studentId: string;
+  studentName: string;
+  username: string;
+  sessionStatus: "started" | "in_progress" | "finished" | "suspended";
+  finishedReason: string | null;
+  score: string | null;
+  startedAt: string;
+  finishedAt: string | null;
+  answerCount: number;
+  violationCount: number;
+  screenshotCount: number;
+  canCancel: boolean;
+  reasons: string[];
+};
+
 export type ExamResultDetail = {
   session: {
     id: string;
