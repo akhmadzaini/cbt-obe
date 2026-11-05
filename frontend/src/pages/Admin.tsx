@@ -9,6 +9,7 @@ import QuestionDeleteDialog from "../components/QuestionDeleteDialog";
 import QuestionEditorModal from "../components/QuestionEditorModal";
 import ParticipantDeleteDialog from "../components/ParticipantDeleteDialog";
 import ParticipantEditorModal from "../components/ParticipantEditorModal";
+import SessionCancelDialog from "../components/SessionCancelDialog";
 import SessionResetDialog from "../components/SessionResetDialog";
 import SystemPanel from "../components/SystemPanel";
 import Toast from "../components/Toast";
@@ -27,6 +28,7 @@ import type {
   PendingGradingSession,
   QuestionInput,
   QuestionUsage,
+  SessionCancelUsage,
   Subject,
   UserImportResult,
 } from "../lib/types";
@@ -46,6 +48,7 @@ import type {
   ParticipantEditorState,
   QuestionDeleteState,
   QuestionEditorState,
+  SessionCancelState,
   SessionResetState,
   ToastState,
 } from "./admin/types";
@@ -86,6 +89,8 @@ export default function AdminPage() {
     useState<ExamCancelState | null>(null);
   const [sessionResetState, setSessionResetState] =
     useState<SessionResetState | null>(null);
+  const [sessionCancelState, setSessionCancelState] =
+    useState<SessionCancelState | null>(null);
   const [examCreateConfirm, setExamCreateConfirm] =
     useState<ExamCreateConfirmState | null>(null);
   const [toast, setToast] = useState<ToastState | null>(null);
@@ -1186,6 +1191,99 @@ export default function AdminPage() {
     }
   }
 
+  async function openSessionCancel(row: ExamResultRow) {
+    setError(null);
+    setNotice(null);
+    setSessionCancelState({
+      sessionId: row.sessionId,
+      usage: null,
+      loadingUsage: true,
+      cancelling: false,
+      error: null,
+    });
+
+    try {
+      const response = await api<{ usage: SessionCancelUsage }>(
+        `/results/${row.sessionId}/usage`,
+      );
+      setSessionCancelState((previous) =>
+        previous && previous.sessionId === row.sessionId
+          ? { ...previous, usage: response.usage, loadingUsage: false }
+          : previous,
+      );
+    } catch (err) {
+      setSessionCancelState((previous) =>
+        previous && previous.sessionId === row.sessionId
+          ? {
+              ...previous,
+              loadingUsage: false,
+              error:
+                err instanceof Error
+                  ? err.message
+                  : "Gagal memeriksa sesi peserta.",
+            }
+          : previous,
+      );
+    }
+  }
+
+  async function handleCancelSession() {
+    const current = sessionCancelState;
+    const usage = current?.usage;
+    if (!current || current.cancelling || !usage?.canCancel) return;
+
+    setSessionCancelState((previous) =>
+      previous ? { ...previous, cancelling: true, error: null } : previous,
+    );
+    setError(null);
+
+    try {
+      const response = await api<{
+        ok: boolean;
+        deletedAnswers: number;
+        deletedViolations: number;
+        deletedScreenshots: number;
+      }>(`/results/${current.sessionId}`, { method: "DELETE" });
+
+      setSessionCancelState(null);
+      if (resultDetail?.session.id === current.sessionId) {
+        setResultDetail(null);
+      }
+      setNotice(
+        `Submission ${usage.studentName} dibatalkan. ${response.deletedAnswers} jawaban dan sesi peserta dihapus.`,
+      );
+
+      try {
+        await loadResults();
+      } catch (err) {
+        setError(
+          err instanceof Error ? err.message : "Gagal memuat ulang skor peserta.",
+        );
+      }
+
+      try {
+        await loadExams();
+      } catch (err) {
+        setError(
+          err instanceof Error ? err.message : "Gagal memuat ulang daftar ujian.",
+        );
+      }
+    } catch (err) {
+      setSessionCancelState((previous) =>
+        previous
+          ? {
+              ...previous,
+              cancelling: false,
+              error:
+                err instanceof Error
+                  ? err.message
+                  : "Gagal membatalkan submission.",
+            }
+          : previous,
+      );
+    }
+  }
+
   function toggleQuestion(questionId: string) {
     setSelectedQuestionIds((previous) =>
       previous.includes(questionId)
@@ -1394,6 +1492,7 @@ export default function AdminPage() {
             resultDetailLoading={resultDetailLoading}
             handleOpenResult={handleOpenResult}
             openSessionReset={openSessionReset}
+            openSessionCancel={openSessionCancel}
           />
         )}
 
@@ -1501,6 +1600,18 @@ export default function AdminPage() {
           error={sessionResetState.error}
           onClose={() => setSessionResetState(null)}
           onConfirm={() => void handleResetSession()}
+        />
+      )}
+
+      {sessionCancelState && (
+        <SessionCancelDialog
+          key={sessionCancelState.sessionId}
+          usage={sessionCancelState.usage}
+          loadingUsage={sessionCancelState.loadingUsage}
+          cancelling={sessionCancelState.cancelling}
+          error={sessionCancelState.error}
+          onClose={() => setSessionCancelState(null)}
+          onConfirm={() => void handleCancelSession()}
         />
       )}
 

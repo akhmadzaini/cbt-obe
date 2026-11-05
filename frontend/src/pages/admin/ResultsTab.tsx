@@ -25,6 +25,7 @@ type Props = {
   resultDetailLoading: boolean;
   handleOpenResult: (sessionId: string) => Promise<void>;
   openSessionReset: (row: ExamResultRow) => void;
+  openSessionCancel: (row: ExamResultRow) => void;
 };
 
 export default function ResultsTab({
@@ -49,6 +50,7 @@ export default function ResultsTab({
   resultDetailLoading,
   handleOpenResult,
   openSessionReset,
+  openSessionCancel,
 }: Props) {
   return (
           <section className="card">
@@ -274,6 +276,16 @@ export default function ResultsTab({
                             >
                               Detail
                             </button>
+                            {user?.role === "admin" &&
+                              row.status === "finished" && (
+                                <button
+                                  type="button"
+                                  className="rounded-lg border border-rose-300 px-2 py-1 text-xs font-semibold text-rose-700 hover:bg-rose-50"
+                                  onClick={() => openSessionCancel(row)}
+                                >
+                                  Batalkan Submission
+                                </button>
+                              )}
                             {user?.role === "admin" &&
                               row.status === "finished" &&
                               row.finishedReason === "force_submit" && (

@@ -10,6 +10,8 @@ const ACTION_LABELS: Record<string, string> = {
   "restore.fail": "Restore gagal",
   "reset.factory": "Factory reset",
   "reset.fail": "Factory reset gagal",
+  "session.reset": "Reset sesi peserta",
+  "session.cancel": "Batalkan submission peserta",
 };
 
 export default function EventLogSection({ events }: { events: SystemEventRow[] }) {

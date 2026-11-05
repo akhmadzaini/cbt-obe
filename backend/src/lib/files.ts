@@ -52,3 +52,28 @@ export async function removeQuestionUploads(
     // Pembersihan file bersifat best-effort; data utama sudah terhapus.
   }
 }
+
+/**
+ * Menghapus seluruh screenshot pelanggaran milik satu sesi.
+ * Hanya folder violations/<sessionId> yang disentuh; kegagalan diabaikan.
+ */
+export async function removeSessionUploads(
+  sessionId: string,
+): Promise<void> {
+  if (!/^[A-Za-z0-9-]+$/.test(sessionId)) return;
+
+  const violationsRoot = path.resolve(env.uploadDir, "violations");
+  const directory = path.resolve(violationsRoot, sessionId);
+  if (
+    directory !== violationsRoot &&
+    !directory.startsWith(`${violationsRoot}${path.sep}`)
+  ) {
+    return;
+  }
+
+  try {
+    await rm(directory, { recursive: true, force: true });
+  } catch {
+    // Pembersihan file bersifat best-effort; data utama sudah terhapus.
+  }
+}

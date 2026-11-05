@@ -6,6 +6,7 @@ import {
   desc,
   eq,
   inArray,
+  isNotNull,
   like,
   max,
   or,
@@ -27,8 +28,10 @@ import {
 import { getClientIp } from "../lib/auth";
 import { authPlugin } from "../lib/auth-plugin";
 import { logSystemEvent } from "../lib/audit";
+import { removeSessionUploads } from "../lib/files";
 import { RATE_LIMITS } from "../lib/rate-limit";
 import { remainingSeconds } from "../lib/session-service";
+import { getSessionUsage } from "../lib/session-usage";
 import { buildResultsExport } from "../lib/results-export";
 
 function parseLimit(value: string | undefined, fallback: number): number {
@@ -311,6 +314,144 @@ export const resultRoutes = new Elysia({ prefix: "/api/results" })
       },
     },
   )
+  .delete(
+    "/:sessionId",
+    async ({ params, user, request, server, status }) => {
+      const result = await db.transaction(async (tx) => {
+        const [session] = await tx
+          .select()
+          .from(examSessions)
+          .where(eq(examSessions.id, params.sessionId))
+          .for("update");
+
+        if (!session) {
+          return {
+            ok: false as const,
+            code: 404,
+            error: "Sesi tidak ditemukan.",
+          };
+        }
+        if (session.status !== "finished") {
+          return {
+            ok: false as const,
+            code: 409,
+            error:
+              "Hanya sesi yang sudah selesai yang submission-nya dapat dibatalkan.",
+          };
+        }
+
+        const [exam] = await tx
+          .select({
+            id: exams.id,
+            title: exams.title,
+            status: exams.status,
+          })
+          .from(exams)
+          .where(eq(exams.id, session.examId))
+          .limit(1);
+        if (!exam) {
+          return {
+            ok: false as const,
+            code: 404,
+            error: "Ujian tidak ditemukan.",
+          };
+        }
+        if (exam.status === "archived") {
+          return {
+            ok: false as const,
+            code: 409,
+            error:
+              "Ujian sudah diarsipkan. Buka kembali status ujian sebelum membatalkan submission.",
+          };
+        }
+
+        const [answerTotal] = await tx
+          .select({ total: count() })
+          .from(examAnswers)
+          .where(eq(examAnswers.sessionId, session.id));
+        const [violationTotal] = await tx
+          .select({ total: count() })
+          .from(examViolationLogs)
+          .where(eq(examViolationLogs.sessionId, session.id));
+        const [screenshotTotal] = await tx
+          .select({ total: count() })
+          .from(examViolationLogs)
+          .where(
+            and(
+              eq(examViolationLogs.sessionId, session.id),
+              isNotNull(examViolationLogs.screenshotUrl),
+            ),
+          );
+
+        // Hapus eksplisit agar jumlah yang dilaporkan ke audit akurat dan tidak
+        // bergantung pada cascade database.
+        await tx
+          .delete(examAnswers)
+          .where(eq(examAnswers.sessionId, session.id));
+        await tx
+          .delete(examViolationLogs)
+          .where(eq(examViolationLogs.sessionId, session.id));
+        await tx.delete(examSessions).where(eq(examSessions.id, session.id));
+
+        return {
+          ok: true as const,
+          sessionId: session.id,
+          examId: session.examId,
+          examTitle: exam.title,
+          studentId: session.userId,
+          finishedReason: session.finishedReason,
+          score: session.score,
+          answerCount: Number(answerTotal?.total ?? 0),
+          violationCount: Number(violationTotal?.total ?? 0),
+          screenshotCount: Number(screenshotTotal?.total ?? 0),
+        };
+      });
+
+      if (!result.ok) return status(result.code, { error: result.error });
+
+      // Screenshot pelanggaran disimpan di folder per sesi; bersihkan setelah
+      // transaksi sukses tanpa menggagalkan operasi utama.
+      await removeSessionUploads(result.sessionId);
+
+      const [actor] = await db
+        .select({ username: users.username })
+        .from(users)
+        .where(eq(users.id, user.sub))
+        .limit(1);
+
+      await logSystemEvent({
+        actorId: user.sub,
+        actorUsername: actor?.username ?? "admin",
+        action: "session.cancel",
+        detail: {
+          sessionId: result.sessionId,
+          examId: result.examId,
+          examTitle: result.examTitle,
+          studentId: result.studentId,
+          finishedReason: result.finishedReason,
+          score: result.score,
+          answerCount: result.answerCount,
+          violationCount: result.violationCount,
+          screenshotCount: result.screenshotCount,
+        },
+        ip: getClientIp(request, server),
+      });
+
+      return {
+        ok: true,
+        sessionId: result.sessionId,
+        deletedAnswers: result.answerCount,
+        deletedViolations: result.violationCount,
+        deletedScreenshots: result.screenshotCount,
+      };
+    },
+    {
+      auth: {
+        roles: ["admin"],
+        rateLimit: { name: "session-cancel", ...RATE_LIMITS.crud },
+      },
+    },
+  )
   .get(
     "/export",
     async ({ query, status }) => {
@@ -351,6 +492,17 @@ export const resultRoutes = new Elysia({ prefix: "/api/results" })
         mode: t.Optional(t.String()),
       }),
     },
+  )
+  .get(
+    "/:sessionId/usage",
+    async ({ params, status }) => {
+      const usage = await getSessionUsage(params.sessionId);
+      if (!usage) {
+        return status(404, { error: "Sesi tidak ditemukan." });
+      }
+      return { usage };
+    },
+    { auth: { roles: ["admin"] } },
   )
   .get(
     "/:sessionId",
