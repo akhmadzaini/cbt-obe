@@ -28,7 +28,7 @@ export const subjectRoutes = new Elysia({ prefix: "/api/subjects" })
       return { subject: { id, code: body.code, name: body.name } };
     },
     {
-      auth: { roles: ["admin", "teacher"] },
+      auth: { roles: ["admin"] },
       body: t.Object({
         code: t.String({ minLength: 1, maxLength: 30 }),
         name: t.String({ minLength: 1, maxLength: 150 }),

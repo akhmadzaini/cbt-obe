@@ -144,41 +144,54 @@ export default function QuestionBankTab({
                       <span>{question.points} poin</span>
                       {question.category && <span>· {question.category}</span>}
                       <span>· {question.sourceFormat}</span>
+                      {!question.canManage && (
+                        <span className="rounded-full bg-slate-100 px-2 py-0.5 font-semibold text-slate-500">
+                          Bank bersama
+                        </span>
+                      )}
                       <div className="ml-auto flex flex-wrap items-center gap-2">
-                        <button
-                          type="button"
-                          className="rounded-lg border border-slate-200 px-2 py-1 font-semibold text-slate-600 hover:bg-slate-50"
-                          onClick={() => void openEditQuestion(question)}
-                        >
-                          Edit
-                        </button>
-                        <button
-                          type="button"
-                          className="rounded-lg border border-rose-200 px-2 py-1 font-semibold text-rose-600 hover:bg-rose-50"
-                          onClick={() => void openDeleteQuestion(question)}
-                        >
-                          Hapus
-                        </button>
-                        <label className="cursor-pointer rounded-lg border border-slate-200 px-2 py-1 font-semibold text-brand-600 hover:bg-slate-50">
-                          {uploadingQuestionId === question.id
-                            ? "Mengunggah..."
-                            : question.imageUrl
-                              ? "Ganti gambar"
-                              : "Upload gambar"}
-                          <input
-                            type="file"
-                            accept="image/png,image/jpeg,image/webp"
-                            className="hidden"
-                            disabled={uploadingQuestionId !== null}
-                            onChange={(event) => {
-                              void handleUploadImage(
-                                question.id,
-                                event.target.files?.[0] ?? null,
-                              );
-                              event.target.value = "";
-                            }}
-                          />
-                        </label>
+                        {question.canManage ? (
+                          <>
+                            <button
+                              type="button"
+                              className="rounded-lg border border-slate-200 px-2 py-1 font-semibold text-slate-600 hover:bg-slate-50"
+                              onClick={() => void openEditQuestion(question)}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              className="rounded-lg border border-rose-200 px-2 py-1 font-semibold text-rose-600 hover:bg-rose-50"
+                              onClick={() => void openDeleteQuestion(question)}
+                            >
+                              Hapus
+                            </button>
+                            <label className="cursor-pointer rounded-lg border border-slate-200 px-2 py-1 font-semibold text-brand-600 hover:bg-slate-50">
+                              {uploadingQuestionId === question.id
+                                ? "Mengunggah..."
+                                : question.imageUrl
+                                  ? "Ganti gambar"
+                                  : "Upload gambar"}
+                              <input
+                                type="file"
+                                accept="image/png,image/jpeg,image/webp"
+                                className="hidden"
+                                disabled={uploadingQuestionId !== null}
+                                onChange={(event) => {
+                                  void handleUploadImage(
+                                    question.id,
+                                    event.target.files?.[0] ?? null,
+                                  );
+                                  event.target.value = "";
+                                }}
+                              />
+                            </label>
+                          </>
+                        ) : (
+                          <span className="text-xs text-slate-400">
+                            Hanya admin dapat mengubah
+                          </span>
+                        )}
                       </div>
                     </div>
                     <p className="mt-2 line-clamp-2 text-sm font-medium text-slate-800">

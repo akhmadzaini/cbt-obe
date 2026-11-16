@@ -2,6 +2,12 @@ import { Elysia, t } from "elysia";
 import { and, desc, eq } from "drizzle-orm";
 import { db } from "../db";
 import { questionOptions, questions, subjects } from "../db/schema";
+import {
+  canManageQuestion,
+  canViewQuestion,
+  questionScopeCondition,
+} from "../lib/access";
+import type { AuthUser } from "../lib/auth";
 import { authPlugin } from "../lib/auth-plugin";
 import { removeQuestionUploads, saveUploadedFile } from "../lib/files";
 import {
@@ -20,7 +26,7 @@ import {
   type QuestionInput,
 } from "../lib/questions";
 
-async function loadQuestionDetails(questionIds: string[]) {
+async function loadQuestionDetails(questionIds: string[], user: AuthUser) {
   const bundles = await loadQuestionBundles(questionIds);
 
   return questionIds
@@ -30,7 +36,37 @@ async function loadQuestionDetails(questionIds: string[]) {
       ...question,
       options,
       matchPairs,
+      canManage: canManageQuestion(question.createdBy, user),
     }));
+}
+
+type QuestionAccess = {
+  id: string;
+  createdBy: string | null;
+  canManage: boolean;
+};
+
+/**
+ * Soal milik guru lain tidak boleh terlihat sama sekali (404). Soal bank
+ * bersama boleh dilihat guru, tetapi hanya admin yang boleh mengubahnya.
+ */
+async function findQuestionAccess(
+  questionId: string,
+  user: AuthUser,
+): Promise<QuestionAccess | null> {
+  const [row] = await db
+    .select({ id: questions.id, createdBy: questions.createdBy })
+    .from(questions)
+    .where(eq(questions.id, questionId))
+    .limit(1);
+  if (!row) return null;
+
+  if (!canViewQuestion(row.createdBy, user)) return null;
+
+  return {
+    ...row,
+    canManage: canManageQuestion(row.createdBy, user),
+  };
 }
 
 const optionBody = t.Object({
@@ -61,22 +97,30 @@ export const questionRoutes = new Elysia({ prefix: "/api/questions" })
   .use(authPlugin)
   .get(
     "/",
-    async ({ query }) => {
+    async ({ query, user }) => {
       const subjectId = query.subjectId;
       const rows = await db
         .select()
         .from(questions)
-        .where(subjectId ? eq(questions.subjectId, subjectId) : undefined)
+        .where(
+          and(
+            subjectId ? eq(questions.subjectId, subjectId) : undefined,
+            questionScopeCondition(user),
+          ),
+        )
         .orderBy(desc(questions.createdAt));
 
-      const details = await loadQuestionDetails(rows.map((row) => row.id));
+      const details = await loadQuestionDetails(
+        rows.map((row) => row.id),
+        user,
+      );
       return { questions: details };
     },
     { auth: { roles: ["admin", "teacher"] } },
   )
   .post(
     "/",
-    async ({ body, status }) => {
+    async ({ body, user, status }) => {
       const [subject] = await db
         .select({ id: subjects.id })
         .from(subjects)
@@ -85,11 +129,13 @@ export const questionRoutes = new Elysia({ prefix: "/api/questions" })
       if (!subject) return status(400, { error: "Mapel tidak ditemukan." });
 
       try {
+        // Soal buatan admin menjadi bank soal bersama (created_by NULL).
         const questionId = await createQuestion(
           body.subjectId,
           body as unknown as QuestionInput,
+          user.role === "admin" ? null : user.sub,
         );
-        const [question] = await loadQuestionDetails([questionId]);
+        const [question] = await loadQuestionDetails([questionId], user);
         return { question };
       } catch (error) {
         if (error instanceof QuestionInputError) {
@@ -111,24 +157,33 @@ export const questionRoutes = new Elysia({ prefix: "/api/questions" })
   )
   .get(
     "/:id/usage",
-    async ({ params, status }) => {
-      const [question] = await db
-        .select({ id: questions.id })
-        .from(questions)
-        .where(eq(questions.id, params.id))
-        .limit(1);
-      if (!question) return status(404, { error: "Soal tidak ditemukan." });
+    async ({ params, user, status }) => {
+      const access = await findQuestionAccess(params.id, user);
+      if (!access) return status(404, { error: "Soal tidak ditemukan." });
+      if (!access.canManage) {
+        return status(403, {
+          error: "Rincian pemakaian bank soal hanya dapat dilihat admin.",
+        });
+      }
 
-      return await getQuestionUsage(question.id);
+      return await getQuestionUsage(access.id);
     },
     { auth: { roles: ["admin", "teacher"] } },
   )
   .patch(
     "/:id",
-    async ({ params, body, status }) => {
+    async ({ params, body, user, status }) => {
+      const access = await findQuestionAccess(params.id, user);
+      if (!access) return status(404, { error: "Soal tidak ditemukan." });
+      if (!access.canManage) {
+        return status(403, {
+          error: "Soal bank bersama hanya dapat diubah oleh admin.",
+        });
+      }
+
       try {
         await updateQuestion(params.id, body as unknown as QuestionInput);
-        const [question] = await loadQuestionDetails([params.id]);
+        const [question] = await loadQuestionDetails([params.id], user);
         return { question };
       } catch (error) {
         if (error instanceof QuestionInputError) {
@@ -151,7 +206,15 @@ export const questionRoutes = new Elysia({ prefix: "/api/questions" })
   )
   .delete(
     "/:id",
-    async ({ params, status }) => {
+    async ({ params, user, status }) => {
+      const access = await findQuestionAccess(params.id, user);
+      if (!access) return status(404, { error: "Soal tidak ditemukan." });
+      if (!access.canManage) {
+        return status(403, {
+          error: "Soal bank bersama hanya dapat dihapus oleh admin.",
+        });
+      }
+
       try {
         await deleteQuestion(params.id);
       } catch (error) {
@@ -172,8 +235,11 @@ export const questionRoutes = new Elysia({ prefix: "/api/questions" })
   )
   .get(
     "/:id",
-    async ({ params, status }) => {
-      const [question] = await loadQuestionDetails([params.id]);
+    async ({ params, user, status }) => {
+      const access = await findQuestionAccess(params.id, user);
+      if (!access) return status(404, { error: "Soal tidak ditemukan." });
+
+      const [question] = await loadQuestionDetails([params.id], user);
       if (!question) return status(404, { error: "Soal tidak ditemukan." });
       return { question };
     },
@@ -181,13 +247,15 @@ export const questionRoutes = new Elysia({ prefix: "/api/questions" })
   )
   .post(
     "/:id/image",
-    async ({ params, body, status }) => {
-      const [question] = await db
-        .select({ id: questions.id })
-        .from(questions)
-        .where(eq(questions.id, params.id))
-        .limit(1);
-      if (!question) return status(404, { error: "Soal tidak ditemukan." });
+    async ({ params, body, user, status }) => {
+      const access = await findQuestionAccess(params.id, user);
+      if (!access) return status(404, { error: "Soal tidak ditemukan." });
+      if (!access.canManage) {
+        return status(403, {
+          error: "Soal bank bersama hanya dapat diubah oleh admin.",
+        });
+      }
+      const question = { id: access.id };
 
       let imageUrl: string;
       try {
@@ -215,7 +283,15 @@ export const questionRoutes = new Elysia({ prefix: "/api/questions" })
   )
   .post(
     "/:id/options/:optionId/image",
-    async ({ params, body, status }) => {
+    async ({ params, body, user, status }) => {
+      const access = await findQuestionAccess(params.id, user);
+      if (!access) return status(404, { error: "Soal tidak ditemukan." });
+      if (!access.canManage) {
+        return status(403, {
+          error: "Soal bank bersama hanya dapat diubah oleh admin.",
+        });
+      }
+
       const [option] = await db
         .select({ id: questionOptions.id })
         .from(questionOptions)

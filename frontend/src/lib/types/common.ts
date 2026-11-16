@@ -5,5 +5,6 @@ export type AdminTab =
   | "exam"
   | "grading"
   | "participants"
+  | "teachers"
   | "results"
   | "system";

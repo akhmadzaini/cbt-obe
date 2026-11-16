@@ -90,9 +90,15 @@ export const userRoutes = new Elysia({ prefix: "/api/users" })
   )
   .post(
     "/",
-    async ({ body, status }) => {
+    async ({ body, user, status }) => {
       const username = body.username.trim();
       const fullName = body.fullName.trim();
+      const role = body.role ?? "student";
+      if (role === "teacher" && user.role !== "admin") {
+        return status(403, {
+          error: "Hanya admin yang dapat membuat akun guru.",
+        });
+      }
 
       const usernameError = validateUsername(username);
       if (usernameError) return status(400, { error: usernameError });
@@ -117,7 +123,7 @@ export const userRoutes = new Elysia({ prefix: "/api/users" })
           username,
           passwordHash: await Bun.password.hash(body.password),
           fullName,
-          role: "student",
+          role,
           isActive: body.isActive ?? true,
         });
       } catch (error) {
@@ -144,6 +150,9 @@ export const userRoutes = new Elysia({ prefix: "/api/users" })
         username: t.String(),
         fullName: t.String(),
         password: t.String(),
+        role: t.Optional(
+          t.Union([t.Literal("student"), t.Literal("teacher")]),
+        ),
         isActive: t.Optional(t.Boolean()),
       }),
     },
@@ -185,16 +194,21 @@ export const userRoutes = new Elysia({ prefix: "/api/users" })
   )
   .patch(
     "/:id",
-    async ({ params, body, status }) => {
+    async ({ params, body, user, status }) => {
       const [target] = await db
         .select()
         .from(users)
         .where(eq(users.id, params.id))
         .limit(1);
-      if (!target) return status(404, { error: "Peserta tidak ditemukan." });
-      if (target.role !== "student") {
+      if (!target) return status(404, { error: "Akun tidak ditemukan." });
+      if (target.role === "admin") {
         return status(403, {
-          error: "Hanya akun peserta yang dapat diubah di halaman ini.",
+          error: "Akun admin tidak dapat diubah dari halaman ini.",
+        });
+      }
+      if (target.role === "teacher" && user.role !== "admin") {
+        return status(403, {
+          error: "Hanya admin yang dapat mengubah akun guru.",
         });
       }
 
@@ -274,10 +288,11 @@ export const userRoutes = new Elysia({ prefix: "/api/users" })
         .from(users)
         .where(eq(users.id, params.id))
         .limit(1);
-      if (!target) return status(404, { error: "Peserta tidak ditemukan." });
-      if (target.role !== "student") {
+      if (!target) return status(404, { error: "Akun tidak ditemukan." });
+      if (target.role === "teacher" || target.role === "admin") {
         return status(403, {
-          error: "Hanya akun peserta yang dapat dihapus di halaman ini.",
+          error:
+            "Akun guru dan admin tidak dapat dihapus. Nonaktifkan akun sebagai gantinya.",
         });
       }
 

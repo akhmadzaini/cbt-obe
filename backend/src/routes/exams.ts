@@ -7,9 +7,13 @@ import {
   examQuestions,
   examSessions,
   exams,
-  questions,
   subjects,
 } from "../db/schema";
+import {
+  examScopeCondition,
+  filterVisibleQuestionIds,
+  findExamForUser,
+} from "../lib/access";
 import { authPlugin } from "../lib/auth-plugin";
 import { isRowReferencedError } from "../lib/db-errors";
 import {
@@ -80,6 +84,7 @@ export const examRoutes = new Elysia({ prefix: "/api/exams" })
       examRows = await db
         .select()
         .from(exams)
+        .where(examScopeCondition(user))
         .orderBy(desc(exams.createdAt));
     }
 
@@ -169,6 +174,20 @@ export const examRoutes = new Elysia({ prefix: "/api/exams" })
       }
 
       const examId = randomUUID();
+      const uniqueQuestionIds = [...new Set(body.questionIds ?? [])];
+
+      if (uniqueQuestionIds.length > 0) {
+        const visibleIds = await filterVisibleQuestionIds(
+          uniqueQuestionIds,
+          user,
+        );
+        if (visibleIds.size !== uniqueQuestionIds.length) {
+          return status(403, {
+            error:
+              "Beberapa soal tidak ditemukan atau bukan milik Anda. Muat ulang bank soal.",
+          });
+        }
+      }
 
       let participantIds: string[];
       try {
@@ -198,10 +217,9 @@ export const examRoutes = new Elysia({ prefix: "/api/exams" })
           createdBy: user.sub,
         });
 
-        if (body.questionIds && body.questionIds.length > 0) {
-          const uniqueIds = [...new Set(body.questionIds)];
+        if (uniqueQuestionIds.length > 0) {
           await tx.insert(examQuestions).values(
-            uniqueIds.map((questionId, index) => ({
+            uniqueQuestionIds.map((questionId, index) => ({
               id: randomUUID(),
               examId,
               questionId,
@@ -242,12 +260,8 @@ export const examRoutes = new Elysia({ prefix: "/api/exams" })
   )
   .get(
     "/:id/participants",
-    async ({ params, status }) => {
-      const [exam] = await db
-        .select({ id: exams.id, title: exams.title, status: exams.status })
-        .from(exams)
-        .where(eq(exams.id, params.id))
-        .limit(1);
+    async ({ params, user, status }) => {
+      const exam = await findExamForUser(params.id, user);
       if (!exam) return status(404, { error: "Ujian tidak ditemukan." });
 
       return { exam, ...(await getExamParticipants(exam.id)) };
@@ -257,11 +271,7 @@ export const examRoutes = new Elysia({ prefix: "/api/exams" })
   .put(
     "/:id/participants",
     async ({ params, body, user, status }) => {
-      const [exam] = await db
-        .select({ id: exams.id, title: exams.title, status: exams.status })
-        .from(exams)
-        .where(eq(exams.id, params.id))
-        .limit(1);
+      const exam = await findExamForUser(params.id, user);
       if (!exam) return status(404, { error: "Ujian tidak ditemukan." });
       if (exam.status === "archived") {
         return status(409, {
@@ -302,22 +312,18 @@ export const examRoutes = new Elysia({ prefix: "/api/exams" })
   )
   .get(
     "/:id/usage",
-    async ({ params, status }) => {
-      const usage = await getExamUsage(params.id);
-      if (!usage) return status(404, { error: "Ujian tidak ditemukan." });
+    async ({ params, user, status }) => {
+      const exam = await findExamForUser(params.id, user);
+      if (!exam) return status(404, { error: "Ujian tidak ditemukan." });
 
-      return usage;
+      return await getExamUsage(exam.id);
     },
     { auth: { roles: ["admin", "teacher"] } },
   )
   .get(
     "/:id",
-    async ({ params, status }) => {
-      const [exam] = await db
-        .select()
-        .from(exams)
-        .where(eq(exams.id, params.id))
-        .limit(1);
+    async ({ params, user, status }) => {
+      const exam = await findExamForUser(params.id, user);
       if (!exam) return status(404, { error: "Ujian tidak ditemukan." });
 
       return { exam, questions: await loadExamQuestions(exam.id) };
@@ -326,12 +332,8 @@ export const examRoutes = new Elysia({ prefix: "/api/exams" })
   )
   .patch(
     "/:id/status",
-    async ({ params, body, status }) => {
-      const [exam] = await db
-        .select()
-        .from(exams)
-        .where(eq(exams.id, params.id))
-        .limit(1);
+    async ({ params, body, user, status }) => {
+      const exam = await findExamForUser(params.id, user);
       if (!exam) return status(404, { error: "Ujian tidak ditemukan." });
 
       await db
@@ -354,7 +356,7 @@ export const examRoutes = new Elysia({ prefix: "/api/exams" })
   )
   .delete(
     "/:id",
-    async ({ params, status }) => {
+    async ({ params, user, status }) => {
       type CancelExamResult =
         | { kind: "not_found" }
         | { kind: "conflict"; usage: ExamUsage | null }
@@ -364,12 +366,19 @@ export const examRoutes = new Elysia({ prefix: "/api/exams" })
       try {
         result = await db.transaction(async (tx) => {
           const [exam] = await tx
-            .select({ id: exams.id, title: exams.title })
+            .select({
+              id: exams.id,
+              title: exams.title,
+              createdBy: exams.createdBy,
+            })
             .from(exams)
             .where(eq(exams.id, params.id))
             .for("update");
 
           if (!exam) return { kind: "not_found" as const };
+          if (user.role !== "admin" && exam.createdBy !== user.sub) {
+            return { kind: "not_found" as const };
+          }
 
           const usage = await getExamUsage(exam.id, tx);
           if (!usage || !usage.canCancel) {
@@ -414,12 +423,8 @@ export const examRoutes = new Elysia({ prefix: "/api/exams" })
   )
   .post(
     "/:id/questions",
-    async ({ params, body, status }) => {
-      const [exam] = await db
-        .select()
-        .from(exams)
-        .where(eq(exams.id, params.id))
-        .limit(1);
+    async ({ params, body, user, status }) => {
+      const exam = await findExamForUser(params.id, user);
       if (!exam) return status(404, { error: "Ujian tidak ditemukan." });
 
       const existing = await db
@@ -434,20 +439,20 @@ export const examRoutes = new Elysia({ prefix: "/api/exams" })
         (id) => !existingIds.has(id),
       );
       if (newIds.length > 0) {
-        const found = await db
-          .select({ id: questions.id })
-          .from(questions)
-          .where(inArray(questions.id, newIds));
-        const foundIds = new Set(found.map((row) => row.id));
+        const visibleIds = await filterVisibleQuestionIds(newIds, user);
+        if (visibleIds.size !== newIds.length) {
+          return status(403, {
+            error:
+              "Beberapa soal tidak ditemukan atau bukan milik Anda. Muat ulang bank soal.",
+          });
+        }
 
-        const rows = newIds
-          .filter((id) => foundIds.has(id))
-          .map((questionId, index) => ({
-            id: randomUUID(),
-            examId: exam.id,
-            questionId,
-            orderIndex: nextOrder + index,
-          }));
+        const rows = newIds.map((questionId, index) => ({
+          id: randomUUID(),
+          examId: exam.id,
+          questionId,
+          orderIndex: nextOrder + index,
+        }));
 
         if (rows.length > 0) {
           await db.insert(examQuestions).values(rows);
@@ -465,7 +470,10 @@ export const examRoutes = new Elysia({ prefix: "/api/exams" })
   )
   .delete(
     "/:id/questions/:questionId",
-    async ({ params }) => {
+    async ({ params, user, status }) => {
+      const exam = await findExamForUser(params.id, user);
+      if (!exam) return status(404, { error: "Ujian tidak ditemukan." });
+
       await db
         .delete(examQuestions)
         .where(

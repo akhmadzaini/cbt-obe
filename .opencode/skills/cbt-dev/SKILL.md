@@ -88,20 +88,46 @@ diubah.
   dibersihkan best-effort lewat `removeQuestionUploads()`.
 - `sourceFormat`, `sourceRef`, dan `rawSource` dipertahankan saat edit.
 
+## Peran guru & kepemilikan data
+
+- Tiga peran: `admin`, `teacher`, `student`. Admin melihat semua data; guru
+  hanya data miliknya (`exams.created_by`, `questions.created_by`).
+- `questions.created_by = NULL` berarti **bank soal bersama** (data lama atau
+  buatan admin). Semua guru boleh melihat dan memakainya di ujian, tetapi hanya
+  admin yang boleh mengubah/menghapus.
+- Semua endpoint baca/tulis wajib memakai helper di `lib/access.ts`
+  (`examScopeCondition`, `questionScopeCondition`, `findExamForUser`,
+  `filterVisibleQuestionIds`, `canManageQuestion`, `canViewQuestion`). Jangan
+  menambah query baru tanpa filter kepemilikan; akses lintas guru harus 404
+  (bukan 403) agar keberadaan data tidak bocor.
+- Pemasangan soal ke ujian wajib menyaring `filterVisibleQuestionIds()`; guru
+  tidak boleh memakai soal privat guru lain.
+- Hasil, detail hasil, ekspor Excel, dan penilaian essay wajib dibatasi ke ujian
+  milik guru. Reset sesi, pembatalan submission, panel Sistem, dan pembuatan
+  akun guru tetap khusus admin.
+- Mapel bersifat global dan hanya admin yang boleh membuatnya (`POST
+  /api/subjects`). Akun siswa tetap global; guru boleh membuat/mengelola akun
+  siswa dan memilih peserta untuk ujiannya sendiri.
+- Frontend admin menampilkan tab **Guru** (khusus admin) dengan
+  `TeacherTab.tsx`; soal bank bersama ditandai `canManage = false` sehingga
+  tombol edit/hapus/upload disembunyikan.
+
 ## Manajemen peserta manual
 
 - Endpoint: `GET /api/users?role=student`, `POST /api/users`,
   `PATCH /api/users/:id`, `DELETE /api/users/:id`, dan
   `GET /api/users/:id/usage`.
-- Endpoint hanya mengelola akun `student`; jangan izinkan endpoint ini mengubah
-  akun admin/guru.
+- `POST /api/users` menerima `role` opsional `student|teacher`; hanya admin yang
+  boleh membuat `teacher`. Akun admin tidak boleh diubah/dihapus lewat endpoint
+  ini. Akun guru tidak boleh dihapus (nonaktifkan lewat `isActive`).
 - Create: username unik (case-insensitive), 3-100 karakter, pola
   `[A-Za-z0-9._-]+`; nama 1-150; password 8-128; `isActive` default `true`.
 - Edit: username boleh diubah dengan cek unik; password opsional (kosong =
   tidak diubah); nonaktifkan akun lewat `isActive`.
 - Hapus peserta diblokir jika sudah memiliki `exam_sessions`. Arahkan admin
   untuk menonaktifkan akun. Jangan menghapus sesi/jawaban peserta.
-- Frontend memakai `ParticipantEditorModal` dan `ParticipantDeleteDialog`.
+- Frontend memakai `ParticipantEditorModal` dan `ParticipantDeleteDialog`;
+  akun guru memakai `TeacherTab.tsx`.
 
 ## Peserta per ujian
 
@@ -158,6 +184,9 @@ Tabel utama: `users`, `subjects`, `exams`, `questions`, `question_options`,
 - `grading_status`: `pending`, `partial` (ada essay belum dinilai), `completed`.
 - Opsi benar/salah memakai `question_options.fraction` (0..1). Soal non-opsi
   memakai `questions.answer_key` JSON.
+- `exams.created_by` wajib terisi; `questions.created_by` nullable dengan
+  `NULL` = bank soal bersama. Migrasi `004_teacher_ownership.sql` menambahkan
+  kolom/index/FK tersebut dan idempoten.
 
 ## Bentuk payload jawaban
 

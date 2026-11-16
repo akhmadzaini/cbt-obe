@@ -25,6 +25,8 @@ export type AdminQuestion = {
   answerKey: QuestionAnswerKey;
   sourceFormat: string;
   sourceRef: string | null;
+  createdBy: string | null;
+  canManage: boolean;
   options: {
     id: string;
     label: string;
