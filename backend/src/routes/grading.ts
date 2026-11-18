@@ -9,6 +9,7 @@ import {
   questions,
   users,
 } from "../db/schema";
+import { findExamForUser } from "../lib/access";
 import { authPlugin } from "../lib/auth-plugin";
 
 type GradeFailure = {
@@ -31,7 +32,7 @@ export const gradingRoutes = new Elysia({ prefix: "/api/grading" })
   .use(authPlugin)
   .get(
     "/pending",
-    async () => {
+    async ({ user }) => {
       const sessionRows = await db
       .select({
         sessionId: examSessions.id,
@@ -50,6 +51,7 @@ export const gradingRoutes = new Elysia({ prefix: "/api/grading" })
         and(
           eq(examSessions.status, "finished"),
           eq(examSessions.gradingStatus, "partial"),
+          user.role === "admin" ? undefined : eq(exams.createdBy, user.sub),
         ),
       )
       .orderBy(desc(examSessions.finishedAt));
@@ -121,7 +123,7 @@ export const gradingRoutes = new Elysia({ prefix: "/api/grading" })
   )
   .post(
     "/sessions/:id",
-    async ({ params, body, status }) => {
+    async ({ params, body, user, status }) => {
       const result = await db.transaction(
         async (tx): Promise<GradeFailure | GradeSuccess> => {
           const [session] = await tx
@@ -131,6 +133,15 @@ export const gradingRoutes = new Elysia({ prefix: "/api/grading" })
             .for("update");
 
           if (!session) {
+            return {
+              ok: false,
+              code: 404,
+              error: "Sesi tidak ditemukan.",
+            };
+          }
+
+          const exam = await findExamForUser(session.examId, user, tx);
+          if (!exam) {
             return {
               ok: false,
               code: 404,

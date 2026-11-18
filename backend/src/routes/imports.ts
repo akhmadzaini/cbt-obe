@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { Elysia, t } from "elysia";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { db } from "../db";
 import { questionImports, subjects } from "../db/schema";
 import { authPlugin } from "../lib/auth-plugin";
@@ -48,6 +48,7 @@ export const importRoutes = new Elysia({ prefix: "/api/imports" })
             subject.id,
             result.questions[index],
             body.format,
+            user.role === "admin" ? null : user.sub,
           );
           imported += 1;
         } catch (error) {
@@ -93,7 +94,7 @@ export const importRoutes = new Elysia({ prefix: "/api/imports" })
   )
   .get(
     "/",
-    async () => {
+    async ({ user }) => {
       const rows = await db
       .select({
         id: questionImports.id,
@@ -108,6 +109,13 @@ export const importRoutes = new Elysia({ prefix: "/api/imports" })
         completedAt: questionImports.completedAt,
       })
       .from(questionImports)
+      .where(
+        and(
+          user.role === "admin"
+            ? undefined
+            : eq(questionImports.importedBy, user.sub),
+        ),
+      )
       .orderBy(desc(questionImports.createdAt));
 
       return { imports: rows };

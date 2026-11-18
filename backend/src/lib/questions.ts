@@ -469,6 +469,7 @@ async function syncMatchPairs(
 export async function createQuestion(
   subjectId: string,
   input: QuestionInput,
+  createdBy: string | null = null,
 ): Promise<string> {
   const question = normalizeQuestionInput(input);
   const questionId = randomUUID();
@@ -486,6 +487,7 @@ export async function createQuestion(
       sourceFormat: "manual",
       sourceRef: null,
       rawSource: null,
+      createdBy,
     });
 
     await insertQuestionChildren(tx, questionId, question);
@@ -600,6 +602,7 @@ export async function insertParsedQuestion(
   subjectId: string,
   parsed: ParsedQuestion,
   format: "aiken" | "gift",
+  createdBy: string | null = null,
 ): Promise<string> {
   const questionId = randomUUID();
 
@@ -616,6 +619,7 @@ export async function insertParsedQuestion(
       sourceFormat: format,
       sourceRef: parsed.sourceRef,
       rawSource: parsed.rawSource,
+      createdBy,
     });
 
     if (parsed.options.length > 0) {

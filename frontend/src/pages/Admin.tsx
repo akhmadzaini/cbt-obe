@@ -36,6 +36,7 @@ import QuestionBankTab from "./admin/QuestionBankTab";
 import ExamTab from "./admin/ExamTab";
 import GradingTab from "./admin/GradingTab";
 import ParticipantsTab from "./admin/ParticipantsTab";
+import TeacherTab from "./admin/TeacherTab";
 import ResultsTab from "./admin/ResultsTab";
 import ResultDetailModal from "./admin/ResultDetailModal";
 import type {
@@ -58,7 +59,10 @@ export default function AdminPage() {
   const [tab, setTab] = useState<AdminTab>("bank");
 
   useEffect(() => {
-    if (tab === "system" && user?.role !== "admin") {
+    if (
+      (tab === "system" || tab === "teachers") &&
+      user?.role !== "admin"
+    ) {
       setTab("bank");
     }
   }, [tab, user?.role]);
@@ -1345,7 +1349,7 @@ export default function AdminPage() {
           </div>
         )}
 
-        {tab !== "system" && (
+        {tab !== "system" && tab !== "teachers" && (
           <div className="card">
             <div className="flex flex-wrap items-end gap-3">
               <div className="min-w-56 flex-1">
@@ -1364,42 +1368,48 @@ export default function AdminPage() {
                 </select>
               </div>
 
-              <form
-                onSubmit={handleCreateSubject}
-                className="flex flex-wrap items-end gap-2"
-              >
-                <div>
-                  <label className="label">Kode mapel baru</label>
-                  <input
-                    className="input w-32"
-                    value={newSubject.code}
-                    onChange={(event) =>
-                      setNewSubject((previous) => ({
-                        ...previous,
-                        code: event.target.value,
-                      }))
-                    }
-                    placeholder="IPA"
-                  />
-                </div>
-                <div>
-                  <label className="label">Nama</label>
-                  <input
-                    className="input w-48"
-                    value={newSubject.name}
-                    onChange={(event) =>
-                      setNewSubject((previous) => ({
-                        ...previous,
-                        name: event.target.value,
-                      }))
-                    }
-                    placeholder="Ilmu Pengetahuan Alam"
-                  />
-                </div>
-                <button className="btn-secondary" disabled={busy} type="submit">
-                  Tambah Mapel
-                </button>
-              </form>
+              {user?.role === "admin" && (
+                <form
+                  onSubmit={handleCreateSubject}
+                  className="flex flex-wrap items-end gap-2"
+                >
+                  <div>
+                    <label className="label">Kode mapel baru</label>
+                    <input
+                      className="input w-32"
+                      value={newSubject.code}
+                      onChange={(event) =>
+                        setNewSubject((previous) => ({
+                          ...previous,
+                          code: event.target.value,
+                        }))
+                      }
+                      placeholder="IPA"
+                    />
+                  </div>
+                  <div>
+                    <label className="label">Nama</label>
+                    <input
+                      className="input w-48"
+                      value={newSubject.name}
+                      onChange={(event) =>
+                        setNewSubject((previous) => ({
+                          ...previous,
+                          name: event.target.value,
+                        }))
+                      }
+                      placeholder="Ilmu Pengetahuan Alam"
+                    />
+                  </div>
+                  <button
+                    className="btn-secondary"
+                    disabled={busy}
+                    type="submit"
+                  >
+                    Tambah Mapel
+                  </button>
+                </form>
+              )}
             </div>
           </div>
         )}
@@ -1495,6 +1505,8 @@ export default function AdminPage() {
             openSessionCancel={openSessionCancel}
           />
         )}
+
+        {tab === "teachers" && user?.role === "admin" && <TeacherTab />}
 
         {tab === "system" && user?.role === "admin" && <SystemPanel />}
       </main>

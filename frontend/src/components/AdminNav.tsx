@@ -139,6 +139,17 @@ export default function AdminNav({
       {isAdmin && (
         <button
           type="button"
+          className={tabClass(active === "teachers")}
+          aria-current={active === "teachers" ? "page" : undefined}
+          onClick={() => select("teachers")}
+        >
+          Guru
+        </button>
+      )}
+
+      {isAdmin && (
+        <button
+          type="button"
           className={tabClass(active === "system")}
           aria-current={active === "system" ? "page" : undefined}
           onClick={() => select("system")}

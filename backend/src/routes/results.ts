@@ -25,6 +25,7 @@ import {
   subjects,
   users,
 } from "../db/schema";
+import { findExamForUser } from "../lib/access";
 import { getClientIp } from "../lib/auth";
 import { authPlugin } from "../lib/auth-plugin";
 import { logSystemEvent } from "../lib/audit";
@@ -50,12 +51,15 @@ export const resultRoutes = new Elysia({ prefix: "/api/results" })
   .use(authPlugin)
   .get(
     "/",
-    async ({ query }) => {
+    async ({ query, user }) => {
       const examId = (query.examId ?? "").trim();
       const search = (query.search ?? "").trim();
       const statusFilter = query.status ?? "all";
 
       const conditions: SQL[] = [];
+      if (user.role !== "admin") {
+        conditions.push(eq(exams.createdBy, user.sub));
+      }
       if (examId) conditions.push(eq(examSessions.examId, examId));
       if (statusFilter === "finished") {
         conditions.push(eq(examSessions.status, "finished"));
@@ -454,10 +458,15 @@ export const resultRoutes = new Elysia({ prefix: "/api/results" })
   )
   .get(
     "/export",
-    async ({ query, status }) => {
+    async ({ query, user, status }) => {
       const examId = (query.examId ?? "").trim();
       if (!examId) {
         return status(400, { error: "examId wajib diisi." });
+      }
+
+      const exam = await findExamForUser(examId, user);
+      if (!exam) {
+        return status(404, { error: "Ujian tidak ditemukan." });
       }
 
       const mode = query.mode ?? "summary";
@@ -506,7 +515,7 @@ export const resultRoutes = new Elysia({ prefix: "/api/results" })
   )
   .get(
     "/:sessionId",
-    async ({ params, status }) => {
+    async ({ params, user, status }) => {
       const [session] = await db
         .select({
           id: examSessions.id,
@@ -528,7 +537,14 @@ export const resultRoutes = new Elysia({ prefix: "/api/results" })
         .innerJoin(users, eq(users.id, examSessions.userId))
         .innerJoin(exams, eq(exams.id, examSessions.examId))
         .leftJoin(subjects, eq(subjects.id, exams.subjectId))
-        .where(eq(examSessions.id, params.sessionId))
+        .where(
+          and(
+            eq(examSessions.id, params.sessionId),
+            user.role === "admin"
+              ? undefined
+              : eq(exams.createdBy, user.sub),
+          ),
+        )
         .limit(1);
 
       if (!session) {

@@ -125,10 +125,18 @@ export const questions = mysqlTable(
       .default("manual"),
     sourceRef: varchar("source_ref", { length: 255 }),
     rawSource: text("raw_source"),
+    /**
+     * Pemilik soal. `null` berarti bank soal bersama (buatan admin / data
+     * lama) yang boleh dipakai semua guru tetapi hanya admin yang mengubah.
+     */
+    createdBy: char("created_by", { length: 36 }),
     createdAt: datetime("created_at").notNull().default(now()),
     updatedAt: datetime("updated_at").notNull().default(now()),
   },
-  (t) => [index("idx_questions_subject_category").on(t.subjectId, t.category)],
+  (t) => [
+    index("idx_questions_subject_category").on(t.subjectId, t.category),
+    index("idx_questions_created_by").on(t.createdBy),
+  ],
 );
 
 export const questionOptions = mysqlTable(

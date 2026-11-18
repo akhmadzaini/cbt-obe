@@ -12,8 +12,12 @@ Sistem ujian berbasis komputer dengan backend **ElysiaJS (Bun)**, frontend **Rea
   - pilihan ganda, multiple response, benar/salah
   - matching, short answer, numerical, essay
   - partial credit (`~%50%`), feedback per opsi, general feedback, `$CATEGORY:`
+- Peran **admin**, **guru**, dan **siswa**. Guru dapat membuat bank soal,
+  menyelenggarakan ujian, menilai essay, dan melihat hasil ujiannya sendiri.
+  Admin melihat seluruh data dan mengelola akun guru serta mapel.
 - Pengelolaan soal manual: tambah, edit, dan hapus dengan pemeriksaan integritas
-  (soal yang sudah dipakai sesi ujian tidak dapat diubah/dihapus).
+  (soal yang sudah dipakai sesi ujian tidak dapat diubah/dihapus). Bank soal
+  bersama (buatan admin) dapat dipakai semua guru tetapi hanya diubah admin.
 - Manajemen peserta manual: tambah, edit, dan hapus akun peserta selain import
   Excel. Peserta yang sudah memiliki sesi ujian tidak dapat dihapus dan dapat
   dinonaktifkan melalui edit.
@@ -95,6 +99,22 @@ Saat pertama kali dijalankan, backend otomatis:
 | Siswa | `siswa`  | `siswa12345` |
 
 Ubah kredensial seed melalui variabel `SEED_*` sebelum pertama kali start, atau ganti langsung di database.
+
+## Peran & kepemilikan data
+
+- **Admin** melihat dan mengelola seluruh ujian, soal, hasil, peserta, dan mapel,
+  serta membuat akun guru dari tab **Guru**.
+- **Guru** hanya melihat ujian dan soal miliknya (`questions.created_by`,
+  `exams.created_by`). Soal milik guru lain tidak terlihat dan tidak dapat
+  dipakai. Soal dengan `created_by = NULL` adalah **bank soal bersama** (data
+  lama atau buatan admin) yang boleh dipakai semua guru tetapi hanya admin yang
+  dapat mengubah/menghapusnya.
+- Daftar peserta (akun siswa) dan mapel bersifat global; guru dapat membuat dan
+  mengelola akun siswa serta memilih peserta untuk ujiannya sendiri.
+- Guru tidak dapat mengakses panel **Sistem**, reset sesi `force_submit`,
+  membatalkan submission, atau membuat akun guru. Operasi tersebut khusus admin.
+- Pembatasan diterapkan di backend pada setiap endpoint baca dan tulis; UI hanya
+  menyembunyikan tombol yang tidak tersedia.
 
 ## Environment
 
@@ -259,8 +279,9 @@ Yang didukung: multiple choice, multiple response, true/false, matching, short a
 |---|---|---|
 | POST | `/api/auth/login` | Login, mengembalikan JWT |
 | GET | `/api/auth/me` | Profil pengguna aktif |
-| GET/POST | `/api/subjects` | Daftar / buat mapel |
-| GET | `/api/exams` | Daftar ujian (siswa: published & di-assign) |
+| GET | `/api/subjects` | Daftar mapel (semua peran) |
+| POST | `/api/subjects` | Buat mapel (khusus admin) |
+| GET | `/api/exams` | Daftar ujian (siswa: published & di-assign; guru: miliknya) |
 | POST | `/api/exams` | Buat ujian (admin/guru), termasuk `participantIds` |
 | PATCH | `/api/exams/:id/status` | Publikasi/arsip |
 | GET | `/api/exams/:id/usage` | Cek sesi peserta sebelum pembatalan ujian |
@@ -275,9 +296,9 @@ Yang didukung: multiple choice, multiple response, true/false, matching, short a
 | GET | `/api/questions/:id/usage` | Cek pemakaian soal di ujian |
 | POST | `/api/questions/:id/image` | Upload gambar soal (multipart) |
 | GET | `/api/users?role=student` | Daftar peserta |
-| POST | `/api/users` | Tambah peserta manual |
-| PATCH | `/api/users/:id` | Edit peserta |
-| DELETE | `/api/users/:id` | Hapus peserta (cek sesi) |
+| POST | `/api/users` | Tambah peserta; admin dapat mengirim `role=teacher` |
+| PATCH | `/api/users/:id` | Edit peserta; admin dapat mengedit akun guru |
+| DELETE | `/api/users/:id` | Hapus peserta (cek sesi); akun guru/admin tidak dapat dihapus |
 | GET | `/api/users/:id/usage` | Cek sesi peserta |
 | POST | `/api/users/import` | Import peserta Excel |
 | GET | `/api/users/template` | Unduh template Excel |
