@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { Elysia, t } from "elysia";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "../../db";
 import { examSessions, examViolationLogs, exams } from "../../db/schema";
 import { authPlugin } from "../../lib/auth-plugin";
@@ -61,16 +61,6 @@ export const sessionViolationRoutes = new Elysia({ prefix: "/api/sessions" })
           return { ok: false as const, code: 403, error: "Sesi bukan milik Anda." };
         }
 
-        if (session.status === "finished") {
-          return {
-            ok: true as const,
-            forceSubmit: true,
-            strikeCount: session.strikeCount,
-            maxStrikes: 0,
-            sessionStatus: session.status,
-          };
-        }
-
         const [exam] = await tx
           .select()
           .from(exams)
@@ -78,6 +68,42 @@ export const sessionViolationRoutes = new Elysia({ prefix: "/api/sessions" })
           .limit(1);
         if (!exam) {
           return { ok: false as const, code: 404, error: "Ujian tidak ditemukan." };
+        }
+
+        if (session.status === "finished") {
+          return {
+            ok: true as const,
+            forceSubmit: true,
+            strikeCount: session.strikeCount,
+            maxStrikes: exam.maxStrikes,
+            sessionStatus: session.status,
+          };
+        }
+
+        const clientEventId = body.clientEventId?.trim() || null;
+        if (clientEventId) {
+          const [duplicate] = await tx
+            .select({ id: examViolationLogs.id })
+            .from(examViolationLogs)
+            .where(
+              and(
+                eq(examViolationLogs.sessionId, session.id),
+                eq(examViolationLogs.clientEventId, clientEventId),
+              ),
+            )
+            .limit(1);
+
+          if (duplicate) {
+            return {
+              ok: true as const,
+              forceSubmit: false,
+              duplicate: true,
+              isStrike: STRIKE_TYPES.has(violationType),
+              strikeCount: session.strikeCount,
+              maxStrikes: exam.maxStrikes,
+              sessionStatus: session.status,
+            };
+          }
         }
 
         const isStrike = STRIKE_TYPES.has(violationType);
@@ -89,6 +115,7 @@ export const sessionViolationRoutes = new Elysia({ prefix: "/api/sessions" })
         await tx.insert(examViolationLogs).values({
           id: randomUUID(),
           sessionId: session.id,
+          clientEventId,
           violationType: violationType as ViolationType,
           strikeNumber: strikeCount,
           screenshotUrl,
@@ -148,6 +175,7 @@ export const sessionViolationRoutes = new Elysia({ prefix: "/api/sessions" })
       },
       body: t.Object({
         violationType: t.String(),
+        clientEventId: t.Optional(t.String({ maxLength: 64 })),
         metadata: t.Optional(t.Any()),
         screenshot: t.Optional(t.File()),
       }),

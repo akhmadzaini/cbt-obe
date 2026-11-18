@@ -1,5 +1,14 @@
 export type OverlayState =
-  | { kind: "violation"; title: string; message: string; strikes: number }
+  | {
+      kind: "violation";
+      title: string;
+      message: string;
+      strikes: number;
+      /** True selama request pelanggaran masih dikirim. */
+      syncing?: boolean;
+      /** True jika pengiriman gagal dan perlu dicoba ulang. */
+      syncError?: boolean;
+    }
   | { kind: "forced"; title: string; message: string; strikes: number }
   | { kind: "confirm"; title: string; message: string; strikes: number }
   | { kind: "reconnect"; title: string; message: string; strikes: number };

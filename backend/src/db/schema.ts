@@ -274,6 +274,11 @@ export const examViolationLogs = mysqlTable(
   {
     id: id(),
     sessionId: char("session_id", { length: 36 }).notNull(),
+    /**
+     * ID idempoten dari klien. Dipakai untuk mencegah strike ganda saat
+     * request normal dan fallback `keepalive` mengirim kejadian yang sama.
+     */
+    clientEventId: varchar("client_event_id", { length: 64 }),
     violationType: mysqlEnum("violation_type", [
       "tab_hidden",
       "window_blur",
@@ -288,7 +293,13 @@ export const examViolationLogs = mysqlTable(
     metadata: json("metadata").$type<Record<string, unknown>>(),
     timestamp: datetime("timestamp").notNull().default(now()),
   },
-  (t) => [index("idx_violation_session_time").on(t.sessionId, t.timestamp)],
+  (t) => [
+    index("idx_violation_session_time").on(t.sessionId, t.timestamp),
+    uniqueIndex("uq_violation_session_event").on(
+      t.sessionId,
+      t.clientEventId,
+    ),
+  ],
 );
 
 export const questionImports = mysqlTable(

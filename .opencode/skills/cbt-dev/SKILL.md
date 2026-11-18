@@ -193,6 +193,10 @@ Tabel utama: `users`, `subjects`, `exams`, `questions`, `question_options`,
 - `exams.created_by` wajib terisi; `questions.created_by` nullable dengan
   `NULL` = bank soal bersama. Migrasi `004_teacher_ownership.sql` menambahkan
   kolom/index/FK tersebut dan idempoten.
+- `exam_violation_logs.client_event_id` nullable + unique
+  `(session_id, client_event_id)` untuk deduplikasi pelanggaran
+  (`005_violation_event_id.sql`). Jangan mengisi ID yang sama untuk kejadian
+  berbeda.
 
 ## Bentuk payload jawaban
 
@@ -253,8 +257,19 @@ gunakan helper yang membaca `text` (fallback `value` untuk data lama).
 - Pelanggaran berat (`tab_hidden`, `window_blur`, `fullscreen_exit`,
   `dom_injection`) menambah strike + menjeda timer + screenshot.
   `contextmenu`, `copy_paste`, `keyboard_shortcut` hanya dicatat, bukan strike.
-- Melebihi `maxStrikes` → `force_submit` + logout paksa. Jangan menambah
-  escape hatch tanpa persetujuan.
+- Sebelum mengirim pelanggaran strike, `ExamRunner` **wajib** mem-flush debounce
+  teks dan antrean offline (`flushTextTimers` + `flushPending`) agar jawaban
+  terakhir ikut dinilai saat server memfinalisasi sesi.
+- Request pelanggaran memakai `clientEventId`. Fallback `pagehide` mengirim
+  JSON keepalive tanpa screenshot dengan ID yang sama; server mendeduplikasi
+  lewat unique index `(session_id, client_event_id)`. Jangan menambah request
+  pelanggaran baru tanpa ID idempoten.
+- Tombol resume dinonaktifkan selama pelanggaran masih dikirim. Jika gagal,
+  tampilkan `syncError` dan kirim ulang sebelum mengizinkan resume; jangan
+  membuka jalan bypass saat offline.
+- Melebihi `maxStrikes` → `force_submit` + logout paksa. Frontend harus
+  membersihkan `cbt_exam_*` dan `cbt_pending_*` setelah force submit.
+  Jangan menambah escape hatch tanpa persetujuan.
 - Pemulihan sesi `force_submit` hanya lewat `POST /api/results/:sessionId/reset`
   (khusus `admin`). Reset mempertahankan jawaban, mengosongkan
   `score_awarded`, mengembalikan strike ke 0, membuka sesi menjadi
