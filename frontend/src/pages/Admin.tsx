@@ -77,6 +77,7 @@ export default function AdminPage() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [exportingGift, setExportingGift] = useState(false);
   const [uploadingQuestionId, setUploadingQuestionId] = useState<string | null>(
     null,
   );
@@ -279,6 +280,29 @@ export default function AdminPage() {
       setError(err instanceof Error ? err.message : "Gagal membuat mapel.");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function handleExportGift() {
+    if (!subjectId) {
+      setError("Pilih mapel terlebih dahulu sebelum mengekspor.");
+      return;
+    }
+
+    setError(null);
+    setNotice(null);
+    setExportingGift(true);
+    try {
+      await apiDownload(
+        `/questions/export?subjectId=${encodeURIComponent(subjectId)}&format=gift`,
+        "bank-soal.txt",
+      );
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Gagal mengekspor bank soal.",
+      );
+    } finally {
+      setExportingGift(false);
     }
   }
 
@@ -1423,6 +1447,8 @@ export default function AdminPage() {
             imports={imports}
             questions={questions}
             uploadingQuestionId={uploadingQuestionId}
+            exportingGift={exportingGift}
+            handleExportGift={handleExportGift}
             handleImport={handleImport}
             openCreateQuestion={openCreateQuestion}
             openEditQuestion={openEditQuestion}
