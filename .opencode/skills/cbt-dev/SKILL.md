@@ -224,6 +224,12 @@ gunakan helper yang membaca `text` (fallback `value` untuk data lama).
   `samples/` dan menjelaskan dampaknya ke penilaian.
 - Setiap soal hasil parsing disimpan lewat `insertParsedQuestion()` dalam satu
   transaksi.
+- Export GIFT: `GET /api/questions/export?subjectId=&format=gift`, dibangun
+  `lib/gift-export.ts`. Wajib memakai `questionScopeCondition(user)` (guru hanya
+  soal miliknya + bank bersama). Teks harus di-escape agar round-trip dengan
+  `parseGift()`: `\`, `{`, `}`, `=`, `~`, `#`, dan `->`. Kategori ditulis
+  `$CATEGORY:`/reset kosong; poin dan gambar tidak didukung GIFT. Jika mengubah
+  parser, perbarui `gift-export.test.ts` (round-trip).
 
 ## Konvensi frontend
 

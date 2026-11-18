@@ -1,5 +1,5 @@
 import { Elysia, t } from "elysia";
-import { and, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import { db } from "../db";
 import { questionOptions, questions, subjects } from "../db/schema";
 import {
@@ -10,6 +10,7 @@ import {
 import type { AuthUser } from "../lib/auth";
 import { authPlugin } from "../lib/auth-plugin";
 import { removeQuestionUploads, saveUploadedFile } from "../lib/files";
+import { buildGiftExport } from "../lib/gift-export";
 import {
   loadQuestionBundles,
   type QuestionBundle,
@@ -67,6 +68,16 @@ async function findQuestionAccess(
     ...row,
     canManage: canManageQuestion(row.createdBy, user),
   };
+}
+
+function safeFilename(value: string): string {
+  return (
+    value
+      .toLowerCase()
+      .replace(/[^a-z0-9._-]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 60) || "mapel"
+  );
 }
 
 const optionBody = t.Object({
@@ -152,6 +163,70 @@ export const questionRoutes = new Elysia({ prefix: "/api/questions" })
       body: t.Object({
         subjectId: t.String(),
         ...questionContentBody,
+      }),
+    },
+  )
+  .get(
+    "/export",
+    async ({ query, user, status }) => {
+      const subjectId = (query.subjectId ?? "").trim();
+      if (!subjectId) {
+        return status(400, { error: "subjectId wajib diisi." });
+      }
+      if (query.format && query.format !== "gift") {
+        return status(400, { error: "Format export hanya mendukung gift." });
+      }
+
+      const [subject] = await db
+        .select({ id: subjects.id, code: subjects.code, name: subjects.name })
+        .from(subjects)
+        .where(eq(subjects.id, subjectId))
+        .limit(1);
+      if (!subject) return status(404, { error: "Mapel tidak ditemukan." });
+
+      const rows = await db
+        .select({ id: questions.id })
+        .from(questions)
+        .where(
+          and(
+            eq(questions.subjectId, subject.id),
+            questionScopeCondition(user),
+          ),
+        )
+        .orderBy(
+          asc(questions.category),
+          asc(questions.createdAt),
+          asc(questions.id),
+        );
+
+      const bundles = await loadQuestionBundles(rows.map((row) => row.id));
+      const ordered = rows
+        .map((row) => bundles.get(row.id))
+        .filter((bundle): bundle is QuestionBundle => Boolean(bundle));
+
+      const content = buildGiftExport(ordered, {
+        subjectName: subject.name,
+        subjectCode: subject.code,
+      });
+      const filename = `bank-soal-${safeFilename(subject.code || subject.name)}.txt`;
+
+      return new Response(content, {
+        headers: {
+          "Content-Type": "text/plain; charset=utf-8",
+          "Content-Disposition": `attachment; filename="${filename}"`,
+          "Content-Length": String(Buffer.byteLength(content, "utf8")),
+          "Cache-Control": "no-store",
+        },
+      });
+    },
+    {
+      auth: {
+        roles: ["admin", "teacher"],
+        rateLimit: { name: "question-export", ...RATE_LIMITS.resultsExport },
+      },
+      query: t.Object({
+        subjectId: t.Optional(t.String()),
+        format: t.Optional(t.String()),
       }),
     },
   )

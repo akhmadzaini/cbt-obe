@@ -9,6 +9,8 @@ type Props = {
   imports: ImportRow[];
   questions: AdminQuestion[];
   uploadingQuestionId: string | null;
+  exportingGift: boolean;
+  handleExportGift: () => Promise<void>;
   handleImport: (event: FormEvent<HTMLFormElement>) => Promise<void>;
   openCreateQuestion: () => void;
   openEditQuestion: (question: AdminQuestion) => Promise<void>;
@@ -22,6 +24,8 @@ export default function QuestionBankTab({
   imports,
   questions,
   uploadingQuestionId,
+  exportingGift,
+  handleExportGift,
   handleImport,
   openCreateQuestion,
   openEditQuestion,
@@ -115,14 +119,25 @@ export default function QuestionBankTab({
                 <h2 className="text-base font-bold text-slate-900">
                   Daftar Soal ({questions.length})
                 </h2>
-                <button
-                  type="button"
-                  className="btn-primary"
-                  onClick={openCreateQuestion}
-                  disabled={!subjectId}
-                >
-                  Tambah Soal
-                </button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={() => void handleExportGift()}
+                    disabled={!subjectId || exportingGift}
+                    title="Unduh bank soal mapel aktif dalam format GIFT"
+                  >
+                    {exportingGift ? "Menyiapkan..." : "Export GIFT"}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-primary"
+                    onClick={openCreateQuestion}
+                    disabled={!subjectId}
+                  >
+                    Tambah Soal
+                  </button>
+                </div>
               </div>
 
               {questions.length === 0 && (

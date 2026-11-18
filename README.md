@@ -20,6 +20,9 @@ Sistem ujian berbasis komputer dengan backend **ElysiaJS (Bun)**, frontend **Rea
 - Pengelolaan soal manual: tambah, edit, dan hapus dengan pemeriksaan integritas
   (soal yang sudah dipakai sesi ujian tidak dapat diubah/dihapus). Bank soal
   bersama (buatan admin) dapat dipakai semua guru tetapi hanya diubah admin.
+- Export bank soal per mapel ke format **GIFT** (`.txt`) dari tab **Bank Soal**.
+  Hasil export dapat diimpor kembali; poin dan gambar soal tidak disertakan
+  karena tidak didukung format GIFT.
 - Manajemen peserta manual: tambah, edit, dan hapus akun peserta selain import
   Excel. Peserta yang sudah memiliki sesi ujian tidak dapat dihapus dan dapat
   dinonaktifkan melalui edit.
@@ -294,6 +297,7 @@ Yang didukung: multiple choice, multiple response, true/false, matching, short a
 | PUT | `/api/exams/:id/participants` | Ganti daftar peserta ujian |
 | POST | `/api/exams/:id/questions` | Lampirkan soal ke ujian |
 | GET | `/api/questions?subjectId=` | Bank soal (admin/guru) |
+| GET | `/api/questions/export?subjectId=&format=gift` | Export bank soal mapel ke GIFT |
 | POST | `/api/questions` | Tambah soal manual |
 | PATCH | `/api/questions/:id` | Edit soal manual |
 | DELETE | `/api/questions/:id` | Hapus soal (cek integritas) |
