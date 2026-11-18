@@ -49,11 +49,30 @@ export function scoreAnswer(
     case "multiple_response": {
       const ids = payload.option_ids;
       if (!Array.isArray(ids) || ids.length === 0) return 0;
-      const total = ids.reduce((sum, id) => {
-        const option = question.options.find((item) => item.id === id);
-        return sum + (option ? Number(option.fraction) : 0);
-      }, 0);
-      return round2(points * Math.min(1, total));
+
+      const selected = new Set(
+        ids.filter((id): id is string => typeof id === "string"),
+      );
+      const correctOptions = question.options.filter(
+        (option) => Number(option.fraction) > 0,
+      );
+      if (correctOptions.length === 0) return 0;
+
+      let positive = 0;
+      let wrong = 0;
+      for (const option of question.options) {
+        if (!selected.has(option.id)) continue;
+        const fraction = Number(option.fraction);
+        if (fraction > 0) positive += fraction;
+        else wrong += 1;
+      }
+
+      // Setiap opsi salah mengurangi bagian yang setara dengan satu opsi benar.
+      // Batasi kontribusi benar ke 1 lebih dulu agar memilih semua opsi benar
+      // (yang fraksinya bisa berjumlah >1) tidak menghapus penalti.
+      const penalty = wrong / correctOptions.length;
+      const fraction = Math.max(0, Math.min(1, positive) - penalty);
+      return round2(points * fraction);
     }
 
     case "matching": {

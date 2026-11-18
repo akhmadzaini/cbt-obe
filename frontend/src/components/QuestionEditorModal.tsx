@@ -468,12 +468,20 @@ export default function QuestionEditorModal({
           </div>
 
           {showOptionEditor && (
-            <OptionListEditor
-              options={options}
-              addOption={addOption}
-              updateOption={updateOption}
-              removeOption={removeOption}
-            />
+            <>
+              <OptionListEditor
+                options={options}
+                addOption={addOption}
+                updateOption={updateOption}
+                removeOption={removeOption}
+              />
+              {questionType === "multiple_response" && (
+                <p className="text-xs text-slate-500">
+                  Opsi 0% dianggap salah. Setiap opsi salah yang dipilih
+                  mengurangi skor sebesar bagian satu opsi benar.
+                </p>
+              )}
+            </>
           )}
 
           {questionType === "true_false" && (

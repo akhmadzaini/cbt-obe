@@ -61,6 +61,10 @@ diubah.
 - Skor dihitung di `lib/scoring.ts`; finalisasi sesi hanya lewat
   `finalizeSession(tx, sessionId, reason)` agar status, skor, dan
   `grading_status` konsisten.
+- `multiple_response`: jumlah fraksi opsi benar terpilih dibatasi 1, lalu
+  dikurangi `1 / jumlah opsi benar` untuk setiap opsi salah terpilih, dan
+  dibatasi minimal 0. ID duplikat/tidak dikenal tidak boleh menambah skor atau
+  penalti. Jangan menghapus penalti ini tanpa persetujuan.
 - Timer bersifat server-authoritative (`deadline_at`). Jeda menambah
   `deadline_at` saat resume, bukan menghitung ulang durasi.
 - Upload file hanya lewat `lib/files.ts` (png/jpg/jpeg/webp) ke

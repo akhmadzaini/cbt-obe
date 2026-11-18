@@ -135,6 +135,89 @@ describe("scoreAnswer", () => {
       );
       expect(score).toBe(0);
     });
+
+    test("memberi penalti saat memilih opsi salah", () => {
+      const score = scoreAnswer(
+        question({ questionType: "multiple_response", options }),
+        {
+          selectedOptionId: null,
+          answerPayload: { option_ids: ["a", "salah"] },
+        },
+      );
+      expect(score).toBe(1.67);
+    });
+
+    test("penalti mengurangi skor jawaban benar yang lengkap", () => {
+      const score = scoreAnswer(
+        question({ questionType: "multiple_response", options }),
+        {
+          selectedOptionId: null,
+          answerPayload: { option_ids: ["a", "b", "salah"] },
+        },
+      );
+      expect(score).toBe(6.67);
+    });
+
+    test("memilih semua opsi termasuk yang salah tidak memberi skor penuh", () => {
+      const score = scoreAnswer(
+        question({ questionType: "multiple_response", options }),
+        {
+          selectedOptionId: null,
+          answerPayload: { option_ids: ["a", "b", "c", "salah"] },
+        },
+      );
+      expect(score).toBe(6.67);
+    });
+
+    test("hanya memilih opsi salah menghasilkan 0", () => {
+      const score = scoreAnswer(
+        question({ questionType: "multiple_response", options }),
+        {
+          selectedOptionId: null,
+          answerPayload: { option_ids: ["salah"] },
+        },
+      );
+      expect(score).toBe(0);
+    });
+
+    test("ID duplikat tidak menambah skor atau penalti ganda", () => {
+      const score = scoreAnswer(
+        question({ questionType: "multiple_response", options }),
+        {
+          selectedOptionId: null,
+          answerPayload: { option_ids: ["a", "a", "salah", "salah"] },
+        },
+      );
+      expect(score).toBe(1.67);
+    });
+
+    test("ID yang tidak dikenal diabaikan", () => {
+      const score = scoreAnswer(
+        question({ questionType: "multiple_response", options }),
+        {
+          selectedOptionId: null,
+          answerPayload: { option_ids: ["a", "tidak-ada"] },
+        },
+      );
+      expect(score).toBe(5);
+    });
+
+    test("satu jawaban benar: memilih opsi salah menghapus skor", () => {
+      const score = scoreAnswer(
+        question({
+          questionType: "multiple_response",
+          options: [
+            { id: "benar", fraction: 1 },
+            { id: "salah", fraction: 0 },
+          ],
+        }),
+        {
+          selectedOptionId: null,
+          answerPayload: { option_ids: ["benar", "salah"] },
+        },
+      );
+      expect(score).toBe(0);
+    });
   });
 
   describe("matching", () => {
