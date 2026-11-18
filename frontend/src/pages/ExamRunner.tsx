@@ -5,7 +5,7 @@ import PreStartScreen from "../components/exam/PreStartScreen";
 import FinishedScreen from "../components/exam/FinishedScreen";
 import ResultScreen from "../components/exam/ResultScreen";
 import type { OverlayState, ResultState } from "../components/exam/types";
-import { api, apiForm, clearToken } from "../lib/api";
+import { api, apiForm, clearToken, getToken } from "../lib/api";
 import {
   captureExamScreenshot,
   enterFullscreen,
@@ -40,6 +40,27 @@ const VIOLATION_MESSAGE: Record<ViolationType, string> = {
 const examStorageKey = (examId: string) => `cbt_exam_${examId}`;
 const pendingStorageKey = (sessionId: string) => `cbt_pending_${sessionId}`;
 
+type PendingViolation = {
+  eventId: string;
+  type: ViolationType;
+  meta?: Record<string, unknown>;
+  screenshot: Blob | null;
+};
+
+type RetryResult = "ok" | "failed" | "forced";
+
+/** ID idempoten agar fallback keepalive tidak menambah strike ganda. */
+function createClientEventId(): string {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
 export default function ExamRunnerPage() {
   const { examId = "" } = useParams();
   const navigate = useNavigate();
@@ -67,6 +88,7 @@ export default function ExamRunnerPage() {
   const overlayStateRef = useRef<OverlayState | null>(null);
   const submittingRef = useRef(false);
   const violationLockRef = useRef(0);
+  const pendingViolationRef = useRef<PendingViolation | null>(null);
   const strikesRef = useRef(0);
   const answersRef = useRef<Record<string, AnswerState>>({});
   const captureLockRef = useRef(false);
@@ -253,6 +275,145 @@ export default function ExamRunnerPage() {
     [examId, flushPending, flushTextTimers],
   );
 
+  const postViolation = useCallback(
+    async (
+      payload: PendingViolation,
+      options?: {
+        screenshot?: boolean;
+        keepalive?: boolean;
+        signal?: AbortSignal;
+      },
+    ) => {
+      const form = new FormData();
+      form.append("violationType", payload.type);
+      form.append("clientEventId", payload.eventId);
+      if (payload.meta) form.append("metadata", JSON.stringify(payload.meta));
+      if (options?.screenshot !== false && payload.screenshot) {
+        form.append("screenshot", payload.screenshot, "violation.png");
+      }
+
+      return apiForm<ViolationResponse>(
+        `/sessions/${sessionIdRef.current}/violations`,
+        form,
+        {
+          ...(options?.keepalive ? { keepalive: true } : {}),
+          ...(options?.signal ? { signal: options.signal } : {}),
+        },
+      );
+    },
+    [],
+  );
+
+  /**
+   * Kirim pelanggaran berat dengan retry. Percobaan terakhir membuang
+   * screenshot dan memakai keepalive agar tetap sempat terkirim saat tab
+   * ditutup. Server melakukan deduplikasi lewat `clientEventId`.
+   */
+  const sendStrikeViolation = useCallback(
+    async (payload: PendingViolation): Promise<ViolationResponse | null> => {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const controller = new AbortController();
+        const timer = window.setTimeout(() => controller.abort(), 8000);
+        try {
+          return await postViolation(payload, { signal: controller.signal });
+        } catch {
+          if (attempt < 2) await delay(600 * (attempt + 1));
+        } finally {
+          window.clearTimeout(timer);
+        }
+      }
+
+      try {
+        return await postViolation(payload, {
+          screenshot: false,
+          keepalive: true,
+        });
+      } catch {
+        return null;
+      }
+    },
+    [postViolation],
+  );
+
+  /** Terapkan response server. Mengembalikan true jika sesi dihentikan paksa. */
+  const applyViolationResponse = useCallback(
+    (response: ViolationResponse): boolean => {
+      strikesRef.current = response.strikeCount;
+      setStrikes(response.strikeCount);
+
+      if (!response.forceSubmit) {
+        setOverlay((previous) =>
+          previous && previous.kind === "violation"
+            ? {
+                ...previous,
+                strikes: response.strikeCount,
+                syncing: false,
+                syncError: false,
+              }
+            : previous,
+        );
+        return false;
+      }
+
+      submittingRef.current = true;
+      activeRef.current = false;
+      pausedRef.current = true;
+      setActive(false);
+      setPaused(true);
+      pendingViolationRef.current = null;
+      setOverlay({
+        kind: "forced",
+        title: "Ujian dihentikan",
+        message: `Batas ${response.maxStrikes} pelanggaran terlampaui. Jawaban dikumpulkan paksa dan Anda akan keluar dari sesi ini. Hubungi admin/pengawas untuk mereset sesi.`,
+        strikes: response.strikeCount,
+      });
+
+      try {
+        localStorage.removeItem(examStorageKey(examId));
+        localStorage.removeItem(pendingStorageKey(sessionIdRef.current));
+      } catch {
+        // ignore storage errors
+      }
+
+      void exitFullscreen();
+      window.setTimeout(() => {
+        clearToken();
+        window.location.assign("/login?forced=1");
+      }, 4500);
+      return true;
+    },
+    [examId],
+  );
+
+  const markViolationSyncFailed = useCallback(() => {
+    setOverlay((previous) =>
+      previous && previous.kind === "violation"
+        ? { ...previous, syncing: false, syncError: true }
+        : previous,
+    );
+  }, []);
+
+  /** Kirim ulang pelanggaran yang tertunda (dipanggil resume/reconnect). */
+  const retryPendingViolation = useCallback(async (): Promise<RetryResult> => {
+    const pending = pendingViolationRef.current;
+    if (!pending) return "ok";
+
+    setOverlay((previous) =>
+      previous && previous.kind === "violation"
+        ? { ...previous, syncing: true, syncError: false }
+        : previous,
+    );
+
+    const response = await sendStrikeViolation(pending);
+    if (!response) {
+      markViolationSyncFailed();
+      return "failed";
+    }
+
+    pendingViolationRef.current = null;
+    return applyViolationResponse(response) ? "forced" : "ok";
+  }, [applyViolationResponse, markViolationSyncFailed, sendStrikeViolation]);
+
   const handleViolation = useCallback(
     async (type: ViolationType, meta?: Record<string, unknown>) => {
       if (!activeRef.current || submittingRef.current || overlayRef.current) {
@@ -264,68 +425,78 @@ export default function ExamRunnerPage() {
       if (now - violationLockRef.current < 1200) return;
       violationLockRef.current = now;
 
-      if (isStrike) {
-        overlayRef.current = true;
-        pausedRef.current = true;
-        setPaused(true);
-        setOverlay({
-          kind: "violation",
-          title: "Pelanggaran terdeteksi",
-          message: VIOLATION_MESSAGE[type],
-          strikes: strikesRef.current + 1,
-        });
-      }
+      const payload: PendingViolation = {
+        eventId: createClientEventId(),
+        type,
+        meta,
+        screenshot: null,
+      };
 
-      let screenshot: Blob | null = null;
-      if (isStrike) {
-        captureLockRef.current = true;
+      if (!isStrike) {
         try {
-          screenshot = await captureExamScreenshot();
-        } finally {
-          captureLockRef.current = false;
+          await postViolation(payload);
+        } catch {
+          // Pelanggaran ringan tidak memblokir ujian.
         }
+        return;
       }
 
-      const form = new FormData();
-      form.append("violationType", type);
-      if (meta) form.append("metadata", JSON.stringify(meta));
-      if (screenshot) form.append("screenshot", screenshot, "violation.png");
+      overlayRef.current = true;
+      pausedRef.current = true;
+      setPaused(true);
+      setOverlay({
+        kind: "violation",
+        title: "Pelanggaran terdeteksi",
+        message: VIOLATION_MESSAGE[type],
+        strikes: strikesRef.current + 1,
+        syncing: true,
+      });
+      pendingViolationRef.current = payload;
 
+      // Fase 1: simpan jawaban terakhir SEBELUM server mem-pause sesi.
       try {
-        const response = await apiForm<ViolationResponse>(
-          `/sessions/${sessionIdRef.current}/violations`,
-          form,
-        );
-
-        strikesRef.current = response.strikeCount;
-        setStrikes(response.strikeCount);
-
-        if (response.forceSubmit) {
-          submittingRef.current = true;
-          activeRef.current = false;
-          pausedRef.current = true;
-          setActive(false);
-          setPaused(true);
-          setOverlay({
-            kind: "forced",
-            title: "Ujian dihentikan",
-            message: `Batas ${response.maxStrikes} pelanggaran terlampaui. Jawaban dikumpulkan paksa dan Anda akan keluar dari sesi ini. Hubungi admin/pengawas untuk mereset sesi.`,
-            strikes: response.strikeCount,
-          });
-          await exitFullscreen();
-          window.setTimeout(() => {
-            clearToken();
-            window.location.assign("/login?forced=1");
-          }, 4500);
-        }
+        await flushTextTimers();
       } catch {
-        // Log gagal dikirim; strike tetap terkunci secara lokal.
+        // jawaban yang gagal tetap masuk antrean offline
       }
+      await flushPending();
+
+      captureLockRef.current = true;
+      try {
+        payload.screenshot = await captureExamScreenshot();
+      } finally {
+        captureLockRef.current = false;
+      }
+
+      const response = await sendStrikeViolation(payload);
+      if (!response) {
+        markViolationSyncFailed();
+        return;
+      }
+
+      pendingViolationRef.current = null;
+      applyViolationResponse(response);
     },
-    [],
+    [
+      applyViolationResponse,
+      flushPending,
+      flushTextTimers,
+      markViolationSyncFailed,
+      postViolation,
+      sendStrikeViolation,
+    ],
   );
 
   const resumeExam = useCallback(async () => {
+    const retry = await retryPendingViolation();
+    if (retry === "failed") {
+      setError(
+        "Data pelanggaran belum terkirim. Periksa koneksi lalu coba lagi.",
+      );
+      return;
+    }
+    if (retry === "forced") return;
+
     const fullscreen = await enterFullscreen();
     if (!fullscreen) {
       setError("Aktifkan mode layar penuh untuk melanjutkan ujian.");
@@ -350,9 +521,33 @@ export default function ExamRunnerPage() {
         err instanceof Error ? err.message : "Gagal melanjutkan ujian.",
       );
     }
-  }, [flushPending, flushTextTimers]);
+  }, [flushPending, flushTextTimers, retryPendingViolation]);
 
   const handleReconnect = useCallback(async () => {
+    const hadPendingViolation = Boolean(pendingViolationRef.current);
+    const retry = await retryPendingViolation();
+    if (retry === "failed") {
+      setOnline(false);
+      return;
+    }
+    if (retry === "forced") return;
+
+    // Pelanggaran berhasil terkirim: server mem-pause sesi, jadi tampilkan
+    // overlay kunci agar peserta masuk fullscreen lalu resume (bukan reconnect).
+    if (hadPendingViolation) {
+      overlayRef.current = true;
+      pausedRef.current = true;
+      setPaused(true);
+      setOverlay({
+        kind: "violation",
+        title: "Ujian terkunci",
+        message:
+          "Pelanggaran berhasil disimpan. Aktifkan layar penuh untuk melanjutkan ujian.",
+        strikes: strikesRef.current,
+      });
+      return;
+    }
+
     await flushTextTimers();
     const flushed = await flushPending();
     if (!flushed) {
@@ -387,7 +582,7 @@ export default function ExamRunnerPage() {
     } catch {
       setOnline(false);
     }
-  }, [flushPending, flushTextTimers]);
+  }, [flushPending, flushTextTimers, retryPendingViolation]);
 
   const startExam = useCallback(async () => {
     setError(null);
@@ -550,6 +745,42 @@ export default function ExamRunnerPage() {
     };
   }, [active, handleViolation]);
 
+  /**
+   * Fallback saat tab ditutup: kirim pelanggaran yang masih tertunda lewat
+   * fetch keepalive. Server mendeduplikasi dengan clientEventId sehingga
+   * request normal yang juga berhasil tidak menambah strike ganda.
+   */
+  useEffect(() => {
+    if (!active) return;
+
+    const onPageHide = () => {
+      const pending = pendingViolationRef.current;
+      const token = getToken();
+      if (!pending || !token) return;
+
+      try {
+        void fetch(`/api/sessions/${sessionIdRef.current}/violations`, {
+          method: "POST",
+          keepalive: true,
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            violationType: pending.type,
+            metadata: pending.meta,
+            clientEventId: pending.eventId,
+          }),
+        });
+      } catch {
+        // Halaman mungkin sudah ditutup; tidak ada yang bisa dilakukan.
+      }
+    };
+
+    window.addEventListener("pagehide", onPageHide);
+    return () => window.removeEventListener("pagehide", onPageHide);
+  }, [active]);
+
   // Blokir interaksi standar.
   useEffect(() => {
     if (!active) return;
@@ -611,6 +842,16 @@ export default function ExamRunnerPage() {
       void handleReconnect();
     }
   }, [online, active, handleReconnect]);
+
+  // Setelah koneksi pulih, kirim ulang pelanggaran yang tertunda otomatis.
+  useEffect(() => {
+    if (!online || !active) return;
+    const currentOverlay = overlayStateRef.current;
+    if (currentOverlay?.kind !== "violation" || !currentOverlay.syncError) return;
+    if (!pendingViolationRef.current) return;
+
+    void retryPendingViolation();
+  }, [online, active, retryPendingViolation]);
 
   function handleSelectOption(question: SessionQuestion, optionId: string) {
     void saveAnswer(question.id, { selectedOptionId: optionId });

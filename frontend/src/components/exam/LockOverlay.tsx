@@ -34,15 +34,34 @@ export default function LockOverlay({
 
         {overlay.kind !== "confirm" && (
           <p className="mt-4 rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600">
-            Pelanggaran tercatat:{" "}
+            {overlay.kind === "violation" && overlay.syncError
+              ? "Pelanggaran belum terkirim ke server: "
+              : "Pelanggaran tercatat: "}
             <span className="font-bold text-slate-900">{overlay.strikes}</span>
+          </p>
+        )}
+
+        {overlay.kind === "violation" && overlay.syncError && (
+          <p className="mt-2 rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-700">
+            Data pelanggaran belum tersimpan karena koneksi terputus. Sambungkan
+            kembali internet, lalu tekan tombol di bawah untuk mengirim ulang
+            sebelum melanjutkan ujian.
           </p>
         )}
 
         <div className="mt-6 flex flex-col gap-2">
           {overlay.kind === "violation" && (
-            <button type="button" className="btn-primary" onClick={onResume}>
-              Aktifkan Layar Penuh & Lanjutkan
+            <button
+              type="button"
+              className="btn-primary"
+              disabled={overlay.syncing}
+              onClick={onResume}
+            >
+              {overlay.syncing
+                ? "Menyinkronkan pelanggaran..."
+                : overlay.syncError
+                  ? "Coba Kirim Ulang & Lanjutkan"
+                  : "Aktifkan Layar Penuh & Lanjutkan"}
             </button>
           )}
 

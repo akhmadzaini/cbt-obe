@@ -267,11 +267,12 @@ Yang didukung: multiple choice, multiple response, true/false, matching, short a
 1. Peserta menekan **Mulai Ujian** → browser masuk fullscreen → `POST /api/sessions/start`.
 2. Timer berjalan dari `deadline_at` server.
 3. Pelanggaran berat (`tab_hidden`, `window_blur`, `fullscreen_exit`, `dom_injection`):
+   - jawaban yang masih menunggu debounce/antrean offline di-flush lebih dulu,
    - overlay muncul, timer lokal & server dijeda,
    - screenshot `#root` dikirim ke backend,
    - strike bertambah.
-4. Peserta menekan **Aktifkan Layar Penuh & Lanjutkan** → `POST /api/sessions/:id/resume` memperpanjang `deadline_at` sesuai durasi jeda.
-5. Jika strike melebihi batas → backend menghitung skor, menutup sesi (`force_submit`), frontend logout.
+4. Peserta menekan **Aktifkan Layar Penuh & Lanjutkan** → `POST /api/sessions/:id/resume` memperpanjang `deadline_at` sesuai durasi jeda. Tombol ini dinonaktifkan sampai server mengonfirmasi pelanggaran; jika pengiriman gagal, peserta harus menyambung ulang dan mengirim ulang.
+5. Jika strike melebihi batas → backend menghitung skor, menutup sesi (`force_submit`), frontend logout. Request pelanggaran memakai `clientEventId` + fallback keepalive agar tetap tercatat saat tab ditutup tanpa menambah strike ganda.
 6. Klik kanan / copy-paste / shortcut tetap diblokir dan **dicatat** sebagai log, tetapi tidak menambah strike.
 7. Peserta yang terlanjur terhenti paksa dapat meminta **admin** melakukan reset sesi dari tab **Skor → Reset**. Reset hanya berlaku untuk sesi `force_submit`, mempertahankan jawaban, mengembalikan strike ke 0, dan membuka kembali sesi sehingga peserta dapat melanjutkan ujian. Waktu selama sesi terhenti dikembalikan, dan timer tetap dijeda sampai peserta masuk mode layar penuh lagi.
 

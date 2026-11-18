@@ -75,8 +75,12 @@ export async function api<T>(
   return data as T;
 }
 
-export function apiForm<T>(path: string, form: FormData): Promise<T> {
-  return api<T>(path, { method: "POST", body: form });
+export function apiForm<T>(
+  path: string,
+  form: FormData,
+  init: RequestInit = {},
+): Promise<T> {
+  return api<T>(path, { ...init, method: "POST", body: form });
 }
 
 function filenameFromDisposition(value: string | null, fallback: string): string {
