@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { api, apiDownload, apiForm, ApiError } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import AdminNav from "../components/AdminNav";
+import ChangePasswordButton from "../components/ChangePasswordButton";
 import ExamCreateDialog from "../components/ExamCreateDialog";
 import ExamCancelDialog from "../components/ExamCancelDialog";
 import ExamParticipantsModal from "../components/ExamParticipantsModal";
@@ -1333,6 +1334,7 @@ export default function AdminPage() {
             onSelect={setTab}
             onLogout={logout}
             isAdmin={user?.role === "admin"}
+            actions={<ChangePasswordButton />}
           />
         </div>
       </header>
