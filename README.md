@@ -5,6 +5,8 @@ Sistem ujian berbasis komputer dengan backend **ElysiaJS (Bun)**, frontend **Rea
 ## Fitur utama
 
 - Login JWT yang diikat ke **User-Agent** (opsional juga IP) untuk mencegah login dua perangkat.
+- Setiap pengguna (admin, guru, siswa) dapat mengubah password sendiri dari
+  tombol **Ubah Password** di header, dengan verifikasi password saat ini.
 - Rate limit login per IP/username serta endpoint berat (import, upload, mulai ujian, autosave, heartbeat), ditambah limit Nginx.
 - Backup, restore, dan factory reset dari panel admin. Arsip `.tar.gz` berisi
   dump database + file upload, dengan safety backup otomatis dan audit log.
@@ -279,6 +281,7 @@ Yang didukung: multiple choice, multiple response, true/false, matching, short a
 |---|---|---|
 | POST | `/api/auth/login` | Login, mengembalikan JWT |
 | GET | `/api/auth/me` | Profil pengguna aktif |
+| POST | `/api/auth/change-password` | Ubah password sendiri (semua peran, wajib password lama) |
 | GET | `/api/subjects` | Daftar mapel (semua peran) |
 | POST | `/api/subjects` | Buat mapel (khusus admin) |
 | GET | `/api/exams` | Daftar ujian (siswa: published & di-assign; guru: miliknya) |

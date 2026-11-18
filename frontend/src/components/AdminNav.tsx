@@ -1,4 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import type { AdminTab } from "../lib/types";
 
 type Props = {
@@ -6,6 +11,7 @@ type Props = {
   onSelect: (tab: AdminTab) => void;
   onLogout: () => void;
   isAdmin?: boolean;
+  actions?: ReactNode;
 };
 
 const EXAM_ITEMS: { tab: AdminTab; label: string }[] = [
@@ -25,6 +31,7 @@ export default function AdminNav({
   onSelect,
   onLogout,
   isAdmin = false,
+  actions,
 }: Props) {
   const [examOpen, setExamOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -157,6 +164,8 @@ export default function AdminNav({
           Sistem
         </button>
       )}
+
+      {actions}
 
       <button type="button" className="btn-secondary" onClick={onLogout}>
         Keluar

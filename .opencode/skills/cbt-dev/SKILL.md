@@ -69,6 +69,12 @@ diubah.
   `src/db/migrations/`; jangan mengubah migrasi yang sudah pernah diterapkan.
 - Password memakai `Bun.password.hash/verify`. Jangan pernah mencatat token,
   password, isi `.env`, atau data pribadi peserta ke log.
+- Ubah password mandiri: `POST /api/auth/change-password`
+  (`currentPassword`, `newPassword`), semua peran, rate limit
+  `RATE_LIMITS.passwordChange`, wajib verifikasi password lama dan
+  `validateNewPassword()`. Frontend memakai `ChangePasswordButton`.
+  Jangan menambah reset password tanpa verifikasi pemilik akun (butuh kanal
+  email/token terpisah).
 
 ## Bank soal manual & integritas
 

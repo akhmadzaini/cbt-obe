@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import ChangePasswordButton from "../components/ChangePasswordButton";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { formatDate } from "../lib/format";
@@ -33,9 +34,12 @@ export default function ExamListPage() {
               Halo, {user?.fullName}
             </h1>
           </div>
-          <button className="btn-secondary" onClick={logout}>
-            Keluar
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <ChangePasswordButton />
+            <button className="btn-secondary" onClick={logout}>
+              Keluar
+            </button>
+          </div>
         </div>
       </header>
 

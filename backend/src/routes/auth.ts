@@ -4,9 +4,11 @@ import { db } from "../db";
 import { users } from "../db/schema";
 import { deviceFingerprint, getClientIp } from "../lib/auth";
 import { authPlugin } from "../lib/auth-plugin";
+import { validateNewPassword } from "../lib/participant-validation";
 import {
   applyRateLimitHeaders,
   checkLoginRateLimit,
+  RATE_LIMITS,
   rateLimitMessage,
   resetLoginUsernameLimit,
 } from "../lib/rate-limit";
@@ -64,6 +66,53 @@ export const authRoutes = new Elysia({ prefix: "/api/auth" })
       body: t.Object({
         username: t.String(),
         password: t.String(),
+      }),
+    },
+  )
+  .post(
+    "/change-password",
+    async ({ body, user: authUser, status }) => {
+      const [account] = await db
+        .select({ id: users.id, passwordHash: users.passwordHash })
+        .from(users)
+        .where(eq(users.id, authUser.sub))
+        .limit(1);
+      if (!account) return status(401, { error: "Unauthorized" });
+
+      if (body.currentPassword === body.newPassword) {
+        return status(400, {
+          error: "Password baru harus berbeda dari password saat ini.",
+        });
+      }
+
+      const valid = await Bun.password.verify(
+        body.currentPassword,
+        account.passwordHash,
+      );
+      if (!valid) {
+        return status(400, { error: "Password saat ini salah." });
+      }
+
+      const passwordError = validateNewPassword(body.newPassword);
+      if (passwordError) return status(400, { error: passwordError });
+
+      await db
+        .update(users)
+        .set({
+          passwordHash: await Bun.password.hash(body.newPassword),
+          updatedAt: new Date(),
+        })
+        .where(eq(users.id, account.id));
+
+      return { ok: true };
+    },
+    {
+      auth: {
+        rateLimit: { name: "password-change", ...RATE_LIMITS.passwordChange },
+      },
+      body: t.Object({
+        currentPassword: t.String(),
+        newPassword: t.String(),
       }),
     },
   )

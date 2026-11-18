@@ -29,6 +29,7 @@ export const RATE_LIMITS = {
   heartbeat: { limit: 120, windowSeconds: 60 },
   submit: { limit: 10, windowSeconds: 60 },
   resultsExport: { limit: 10, windowSeconds: 60 },
+  passwordChange: { limit: 5, windowSeconds: 300 },
   crud: { limit: 60, windowSeconds: 60 },
   systemBackup: { limit: 3, windowSeconds: 300 },
   systemRestore: { limit: 3, windowSeconds: 600 },
