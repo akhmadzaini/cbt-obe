@@ -360,6 +360,11 @@ Vite mem-proxy `/api` dan `/uploads` ke `http://localhost:3000`.
 
 ## Catatan
 
+- Skor **multiple response** = jumlah fraksi opsi benar yang dipilih (maksimal
+  1) dikurangi penalti `1 / jumlah opsi benar` untuk setiap opsi salah yang
+  dipilih, lalu dibatasi minimal 0. Memilih semua opsi benar tetap mendapat
+  skor penuh; menambahkan opsi salah mengurangi skor.
+
 - Essay dinilai manual melalui tab **Nilai Essay** di panel admin; sesi dengan essay akan berstatus `grading_status = partial` sampai semua jawaban essay diberi nilai.
 - Migrasi SQL bersifat idempoten dan dicatat di tabel `_migrations`.
 - Untuk produksi, gunakan password database & JWT secret yang kuat, serta batasi akses langsung ke port database.
