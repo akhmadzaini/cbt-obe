@@ -65,6 +65,11 @@ diubah.
   dikurangi `1 / jumlah opsi benar` untuk setiap opsi salah terpilih, dan
   dibatasi minimal 0. ID duplikat/tidak dikenal tidak boleh menambah skor atau
   penalti. Jangan menghapus penalti ini tanpa persetujuan.
+- Hitung ulang skor lama: `backend/src/recalc-scores.ts` (dry-run default,
+  `--apply`, filter `--exam-id=`/`--session-id=`), inti di
+  `lib/recalc-scores.ts`. Hanya sesi `finished`; nilai essay manual
+  dipertahankan; jangan memakai `finalizeSession()` agar `finished_at` dan
+  `finished_reason` tidak berubah.
 - Timer bersifat server-authoritative (`deadline_at`). Jeda menambah
   `deadline_at` saat resume, bukan menghitung ulang durasi.
 - Upload file hanya lewat `lib/files.ts` (png/jpg/jpeg/webp) ke

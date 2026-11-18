@@ -324,6 +324,27 @@ Yang didukung: multiple choice, multiple response, true/false, matching, short a
 | GET | `/api/results/export` | Ekspor nilai Excel (`examId`, `mode=summary`/`category`) |
 | POST | `/api/results/:sessionId/reset` | Reset sesi `force_submit` (khusus admin) |
 
+## Hitung ulang skor
+
+Skrip ini menghitung ulang skor sesi yang sudah selesai memakai aturan
+`lib/scoring.ts` terbaru. Nilai essay manual dipertahankan; essay yang belum
+dinilai membuat sesi berstatus `partial`. Hanya sesi `finished` yang diproses.
+
+```bash
+# Pratinjau (default, tidak menulis apa pun)
+docker compose exec backend bun src/recalc-scores.ts --dry-run
+
+# Simpan perubahan
+docker compose exec backend bun src/recalc-scores.ts --apply
+
+# Batasi ke satu ujian atau satu sesi
+docker compose exec backend bun src/recalc-scores.ts --dry-run --exam-id=<uuid>
+docker compose exec backend bun src/recalc-scores.ts --apply --session-id=<uuid>
+```
+
+Disarankan membuat backup sebelum `--apply`. Skrip berjalan per sesi dalam
+transaksi dan tidak mengubah `finished_at` maupun `finished_reason`.
+
 ## Deployment di VPS (Nginx Proxy Manager)
 
 1. Arahkan domain ke IP VPS.
@@ -364,6 +385,8 @@ Vite mem-proxy `/api` dan `/uploads` ke `http://localhost:3000`.
   1) dikurangi penalti `1 / jumlah opsi benar` untuk setiap opsi salah yang
   dipilih, lalu dibatasi minimal 0. Memilih semua opsi benar tetap mendapat
   skor penuh; menambahkan opsi salah mengurangi skor.
+- Sesi lama tidak dihitung ulang otomatis. Gunakan skrip `recalc-scores`
+  (lihat bagian **Hitung ulang skor**) setelah mengubah aturan penilaian.
 
 - Essay dinilai manual melalui tab **Nilai Essay** di panel admin; sesi dengan essay akan berstatus `grading_status = partial` sampai semua jawaban essay diberi nilai.
 - Migrasi SQL bersifat idempoten dan dicatat di tabel `_migrations`.
