@@ -230,6 +230,9 @@ gunakan helper yang membaca `text` (fallback `value` untuk data lama).
 - Semua HTTP lewat `api()` / `apiForm()` / `apiDownload()` di `lib/api.ts`
   (token Bearer, penanganan 401, `no-store`). Jangan memanggil `fetch` langsung
   kecuali untuk kasus khusus.
+- Endpoint login memakai `api(..., { allowUnauthorized: true })`. Jangan
+  menampilkan “Sesi berakhir” untuk 401 dari login; teruskan pesan server
+  (“Username atau password salah.”) agar kegagalan akun tidak tertutupi.
 - Jawaban disimpan optimistis ke state + `localStorage`
   (`cbt_exam_<examId>`, `cbt_pending_<sessionId>`), lalu dikirim ke server.
 - Saat mengubah `ExamRunner`:

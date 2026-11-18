@@ -24,9 +24,18 @@ export function clearToken(): void {
   localStorage.removeItem(TOKEN_KEY);
 }
 
+type ApiOptions = {
+  /**
+   * Jangan perlakukan 401 sebagai sesi berakhir. Dipakai endpoint login agar
+   * pesan "Username atau password salah." dari server tidak tertutupi.
+   */
+  allowUnauthorized?: boolean;
+};
+
 export async function api<T>(
   path: string,
   init: RequestInit = {},
+  options: ApiOptions = {},
 ): Promise<T> {
   const headers = new Headers(init.headers);
   if (!(init.body instanceof FormData) && init.body !== undefined) {
@@ -46,7 +55,7 @@ export async function api<T>(
     unknown
   >;
 
-  if (response.status === 401) {
+  if (response.status === 401 && !options.allowUnauthorized) {
     clearToken();
     if (!window.location.pathname.startsWith("/login")) {
       window.location.assign("/login");
